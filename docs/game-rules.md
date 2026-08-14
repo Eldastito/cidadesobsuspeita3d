@@ -107,7 +107,11 @@ substitui a anterior (idempotência) — nunca duplica efeito.
 ## 7. Morte e desconexão
 
 - Morto não fala com vivos, não vota, não age e **não transfere o papel**.
-- Mortos conversam apenas entre si (cemitério) e assistem como espectadores.
+- Mortos conversam apenas entre si (cemitério) e assistem como espectadores —
+  isso vale para **texto e voz**: ao morrer, o jogador é movido automaticamente
+  para o canal de voz do cemitério (o servidor decide os pares; ADR 001).
+- **Voz à noite:** microfones dos vivos são silenciados durante a noite para não
+  vazar o timing de quem age; o cemitério conversa a qualquer hora.
 - Desconexão não mata: o jogador fica “reconectando” e pode retomar com o mesmo
   `sessionId`; ações ausentes valem “não agir”/abstenção.
 - No lobby, quem cai é removido da sala (a vaga fica livre); o anfitrião é transferido

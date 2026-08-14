@@ -217,6 +217,11 @@ export class VillageScene {
     this.rigs.get(playerId)?.showEmote(emoji);
   }
 
+  /** Atualiza os indicadores de fala (voz ativa). */
+  public setSpeakingIds(ids: ReadonlySet<string>): void {
+    this.rigs.forEach((rig, id) => rig.setSpeaking(ids.has(id)));
+  }
+
   private lastPublicVotes = new Map<string, string | null>();
 
   public syncPlayers(players: PublicPlayerView[], localPlayerId: string, selectedTargetId: string | null): void {

@@ -78,6 +78,13 @@ Durante a **noite**, todos os avatares voltam a seus assentos e dormem — o mov
 
 ## Estado atual vs. PRD
 
-Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
+Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, **voz WebRTC** com canal dos vivos e cemitério isolado (malha P2P, ver [ADR 001](docs/adr/001-voz-webrtc-malha.md)), chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
 
-Fora do escopo desta versão (roadmap do PRD): voz WebRTC, salas públicas/matchmaking, contas persistentes, PostgreSQL/Redis (estado é em memória por processo) e observabilidade completa.
+### Voz (Fase 3)
+
+- **Opcional e resiliente**: sem microfone ou sem conexão P2P possível, o jogo continua por texto.
+- **Canais isolados decididos no servidor**: vivos falam só com vivos; mortos, só no cemitério.
+- **Noite silencia os microfones dos vivos** automaticamente, para a voz não vazar quem age.
+- Indicador de "falando" nos avatares 3D (🔊) e na barra de voz; mute do próprio microfone e mute local por colega.
+
+Fora do escopo desta versão (roadmap do PRD): salas públicas/matchmaking, contas persistentes, PostgreSQL/Redis (estado é em memória por processo), TURN/SFU para redes restritivas e observabilidade completa.

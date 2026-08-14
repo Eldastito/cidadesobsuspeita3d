@@ -63,6 +63,25 @@ export interface EmoteEvent {
   emoji: string;
 }
 
+export interface VoicePeersEvent {
+  channel: 'ALIVE' | 'DEAD';
+  peerIds: string[];
+}
+
+export interface VoiceSignalEvent {
+  fromId: string;
+  data: unknown;
+}
+
+/** Canal de sinalização de voz — consumido pelo VoiceManager (WebRTC). */
+export interface VoiceBus {
+  joinVoice: () => void;
+  leaveVoice: () => void;
+  sendSignal: (targetId: string, data: unknown) => void;
+  subscribePeers: (cb: (event: VoicePeersEvent) => void) => () => void;
+  subscribeSignals: (cb: (event: VoiceSignalEvent) => void) => () => void;
+}
+
 /** Canal imperativo de posições e reações — consumido direto pela cena 3D. */
 export interface MovementBus {
   sendMove: (x: number, z: number, ry: number) => void;
@@ -93,6 +112,8 @@ export function useGameClient() {
   const pendingIdentityRef = useRef<{ nickname: string; avatarId: string } | null>(null);
   const positionListenersRef = useRef<Set<PositionListener>>(new Set());
   const emoteListenersRef = useRef<Set<EmoteListener>>(new Set());
+  const voicePeersListenersRef = useRef<Set<(e: VoicePeersEvent) => void>>(new Set());
+  const voiceSignalListenersRef = useRef<Set<(e: VoiceSignalEvent) => void>>(new Set());
 
   const send = (msg: ClientMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -172,6 +193,16 @@ export function useGameClient() {
 
       case 'player.emote.shown': {
         emoteListenersRef.current.forEach(cb => cb(msg.payload));
+        break;
+      }
+
+      case 'voice.peers': {
+        voicePeersListenersRef.current.forEach(cb => cb(msg.payload));
+        break;
+      }
+
+      case 'voice.signal': {
+        voiceSignalListenersRef.current.forEach(cb => cb(msg.payload));
         break;
       }
 
@@ -373,9 +404,27 @@ export function useGameClient() {
     []
   );
 
+  const voiceBus = useMemo<VoiceBus>(
+    () => ({
+      joinVoice: () => send({ type: 'voice.join' }),
+      leaveVoice: () => send({ type: 'voice.leave' }),
+      sendSignal: (targetId, data) => send({ type: 'voice.signal', payload: { targetId, data } }),
+      subscribePeers: cb => {
+        voicePeersListenersRef.current.add(cb);
+        return () => voicePeersListenersRef.current.delete(cb);
+      },
+      subscribeSignals: cb => {
+        voiceSignalListenersRef.current.add(cb);
+        return () => voiceSignalListenersRef.current.delete(cb);
+      },
+    }),
+    []
+  );
+
   return {
     ...state,
     movementBus,
+    voiceBus,
     createRoom,
     joinRoom,
     leaveRoom,

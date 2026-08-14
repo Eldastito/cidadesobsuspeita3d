@@ -18,6 +18,8 @@ interface TownSquare3DProps {
   movementBus: MovementBus;
   /** Eliminado do julgamento atual (fase DAY_RESOLUTION) para a encenação. */
   eliminatedPlayerId?: string | null;
+  /** Quem está falando na voz agora (indicador 🔊). */
+  speakingIds?: ReadonlySet<string>;
 }
 
 const EMOTES = ['👍', '👎', '😂', '😱', '🤔', '😡', '❤️', '🤫'];
@@ -41,6 +43,7 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
   onSelectPlayer,
   movementBus,
   eliminatedPlayerId,
+  speakingIds,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<VillageScene | null>(null);
@@ -88,6 +91,10 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
   useEffect(() => {
     sceneRef.current?.syncPlayers(players, localPlayerId, selectedTargetId);
   }, [players, localPlayerId, selectedTargetId]);
+
+  useEffect(() => {
+    if (speakingIds) sceneRef.current?.setSpeakingIds(speakingIds);
+  }, [speakingIds]);
 
   // Joystick virtual (toque)
   useEffect(() => {

@@ -10,6 +10,7 @@ import { DEFAULT_ROOM_CONFIG } from '../src/engine/rules.ts';
 import { ChatMessage, GamePhase, Player, RoomConfig } from '../src/engine/types.ts';
 import { ClientMessage, PlayerPosition, PlayerPositionMap, ServerMessage } from '../src/engine/protocol.ts';
 import { getRandomBotAvatar, getRandomBotName, processBotActions } from './botAI.ts';
+import { canSignal, voicePeersFor, voiceSignature, VoiceMember } from './voiceChannels.ts';
 
 interface ConnectedClient {
   socket: WebSocket;
@@ -32,6 +33,10 @@ interface RoomRuntime {
   botWaypoints: Map<string, { x: number; z: number }>;
   positionsDirty: boolean;
   lastActivity: number;
+  /** Jogadores com voz ativada (aguardando/na malha WebRTC). */
+  voiceReady: Set<string>;
+  /** Assinatura do último estado de voz difundido. */
+  voiceSig: string;
 }
 
 const PLAZA_RADIUS = 12.5;
@@ -99,6 +104,8 @@ export class RoomManager {
       room.engine.removePlayer(client.playerId);
       room.positions.delete(client.playerId);
       room.positionsDirty = true;
+      room.voiceReady.delete(client.playerId);
+      this.syncVoicePeers(room);
       this.broadcastRoom(client.roomId);
     }
   }
@@ -215,6 +222,32 @@ export class RoomManager {
           room.positions.set(client.playerId, [x * scale, z * scale, ry]);
           room.positionsDirty = true;
         });
+      case 'voice.join':
+        return this.withRoom(socket, (room, client) => {
+          const player = room.engine.players.get(client.playerId);
+          if (!player) return;
+          room.voiceReady.add(client.playerId);
+          this.syncVoicePeers(room, true);
+        });
+      case 'voice.leave':
+        return this.withRoom(socket, (room, client) => {
+          room.voiceReady.delete(client.playerId);
+          this.syncVoicePeers(room, true);
+        });
+      case 'voice.signal':
+        return this.withRoom(socket, (room, client) => {
+          const members = this.voiceMembers(room);
+          if (!canSignal(members, room.voiceReady, client.playerId, msg.payload.targetId)) return;
+          for (const [peerSocket, peerClient] of this.clients.entries()) {
+            if (peerClient.roomId === room.engine.roomId && peerClient.playerId === msg.payload.targetId) {
+              this.sendSocket(peerSocket, {
+                type: 'voice.signal',
+                payload: { fromId: client.playerId, data: msg.payload.data },
+              });
+              return;
+            }
+          }
+        });
       case 'player.emote':
         return this.withRoom(socket, (room, client) => {
           const player = room.engine.players.get(client.playerId);
@@ -268,6 +301,8 @@ export class RoomManager {
       botWaypoints: new Map(),
       positionsDirty: false,
       lastActivity: Date.now(),
+      voiceReady: new Set(),
+      voiceSig: '',
     };
     this.rooms.set(roomId, room);
     this.roomByCode.set(roomCode, roomId);
@@ -351,6 +386,8 @@ export class RoomManager {
       }
       room.positions.delete(client.playerId);
       room.positionsDirty = true;
+      room.voiceReady.delete(client.playerId);
+      this.syncVoicePeers(room);
       this.broadcastRoom(client.roomId);
     }
     this.clients.delete(socket);
@@ -433,6 +470,9 @@ export class RoomManager {
       if (shouldAdvance) {
         this.advancePhase(engine);
       }
+
+      // Mortes mudam o canal de voz (vivos ↔ cemitério)
+      this.syncVoicePeers(room);
 
       this.broadcastRoom(roomId);
     }
@@ -621,6 +661,28 @@ export class RoomManager {
         this.roomByCode.delete(room.engine.roomCode);
         this.rooms.delete(roomId);
       }
+    }
+  }
+
+  private voiceMembers(room: RoomRuntime): VoiceMember[] {
+    return Array.from(room.engine.players.values()).map(p => ({ id: p.id, isAlive: p.isAlive }));
+  }
+
+  /**
+   * Reenvia as listas de pares de voz quando a composição dos canais muda
+   * (entrada/saída de voz, morte, desconexão). `force` ignora a assinatura.
+   */
+  private syncVoicePeers(room: RoomRuntime, force = false): void {
+    const members = this.voiceMembers(room);
+    const sig = voiceSignature(members, room.voiceReady);
+    if (!force && sig === room.voiceSig) return;
+    room.voiceSig = sig;
+
+    for (const [socket, client] of this.clients.entries()) {
+      if (client.roomId !== room.engine.roomId) continue;
+      if (!room.voiceReady.has(client.playerId)) continue;
+      const { channel, peerIds } = voicePeersFor(members, room.voiceReady, client.playerId);
+      this.sendSocket(socket, { type: 'voice.peers', payload: { channel, peerIds } });
     }
   }
 
