@@ -7,10 +7,11 @@
 import { WebSocket } from 'ws';
 import { GameEngine } from '../src/engine/gameEngine.ts';
 import { DEFAULT_ROOM_CONFIG } from '../src/engine/rules.ts';
-import { ChatMessage, GamePhase, Player, RoomConfig } from '../src/engine/types.ts';
+import { ChatMessage, GamePhase, Player, Role, RoomConfig, VictoryWinner } from '../src/engine/types.ts';
 import { ClientMessage, PlayerPosition, PlayerPositionMap, ServerMessage } from '../src/engine/protocol.ts';
 import { getRandomBotAvatar, getRandomBotName, processBotActions } from './botAI.ts';
 import { canSignal, voicePeersFor, voiceSignature, VoiceMember } from './voiceChannels.ts';
+import { Persistence } from './persistence.ts';
 
 interface ConnectedClient {
   socket: WebSocket;
@@ -37,6 +38,10 @@ interface RoomRuntime {
   voiceReady: Set<string>;
   /** Assinatura do último estado de voz difundido. */
   voiceSig: string;
+  /** Estado mudou desde o último flush para o banco. */
+  dirty: boolean;
+  /** Partida atual já registrada no histórico. */
+  matchRecorded: boolean;
 }
 
 const PLAZA_RADIUS = 12.5;
@@ -66,11 +71,107 @@ export class RoomManager {
   private rooms: Map<string, RoomRuntime> = new Map();
   private roomByCode: Map<string, string> = new Map();
   private clients: Map<WebSocket, ConnectedClient> = new Map();
+  private persistence: Persistence | null;
 
-  constructor() {
+  constructor(persistence: Persistence | null = null) {
+    this.persistence = persistence;
+    this.restoreRooms();
+
     setInterval(() => this.gameTick(), TICK_MS);
     setInterval(() => this.positionTick(), POSITION_RELAY_MS);
     setInterval(() => this.cleanupIdleRooms(), 60 * 1000);
+    setInterval(() => this.persistDirtyRooms(), 2000);
+  }
+
+  /** Reergue as salas gravadas no banco após um reinício do processo. */
+  private restoreRooms(): void {
+    if (!this.persistence) return;
+    for (const stored of this.persistence.loadAllRooms()) {
+      try {
+        // Salas finalizadas há muito tempo não voltam — só viram histórico
+        if (Date.now() - stored.updatedAt > ROOM_IDLE_EXPIRE_MS) {
+          this.persistence.deleteRoom(stored.roomId);
+          continue;
+        }
+        const engine = GameEngine.restore(JSON.parse(stored.stateJson));
+        const chatHistory: ChatMessage[] = JSON.parse(stored.chatJson);
+        this.rooms.set(stored.roomId, {
+          engine,
+          chatHistory,
+          positions: new Map(),
+          botWaypoints: new Map(),
+          positionsDirty: false,
+          lastActivity: stored.updatedAt,
+          voiceReady: new Set(),
+          voiceSig: '',
+          dirty: false,
+          matchRecorded: engine.phase === GamePhase.FINISHED,
+        });
+        this.roomByCode.set(engine.roomCode, stored.roomId);
+      } catch (err) {
+        console.error(`Falha ao restaurar sala ${stored.roomId}:`, err);
+        this.persistence.deleteRoom(stored.roomId);
+      }
+    }
+    if (this.rooms.size > 0) {
+      console.log(`💾 ${this.rooms.size} sala(s) restaurada(s) do banco.`);
+    }
+  }
+
+  /** Grava no banco as salas alteradas desde o último flush. */
+  private persistDirtyRooms(): void {
+    if (!this.persistence) return;
+    for (const room of this.rooms.values()) {
+      if (!room.dirty) continue;
+      room.dirty = false;
+      try {
+        this.persistence.saveRoom(
+          room.engine.roomId,
+          room.engine.roomCode,
+          JSON.stringify(room.engine.serialize()),
+          JSON.stringify(room.chatHistory.slice(-200))
+        );
+      } catch (err) {
+        console.error('Falha ao persistir sala:', err);
+      }
+    }
+  }
+
+  /** Registra partida finalizada no histórico e atualiza perfis (uma vez). */
+  private recordFinishedMatch(room: RoomRuntime): void {
+    if (!this.persistence || room.matchRecorded) return;
+    const engine = room.engine;
+    if (engine.phase !== GamePhase.FINISHED || !engine.winner) return;
+    room.matchRecorded = true;
+
+    const players = Array.from(engine.players.values());
+    try {
+      this.persistence.recordMatch({
+        roomCode: engine.roomCode,
+        winner: engine.winner,
+        playerCount: players.length,
+        rounds: engine.roundNumber,
+        players: players.map(p => ({
+          nickname: p.nickname,
+          role: p.role,
+          survived: p.isAlive,
+          isBot: p.isBot,
+        })),
+      });
+
+      for (const p of players) {
+        if (p.isBot || !p.guestId) continue;
+        const won =
+          engine.winner === VictoryWinner.TOWN
+            ? p.role !== Role.ASSASSINO
+            : engine.winner === VictoryWinner.ASSASSINS
+            ? p.role === Role.ASSASSINO
+            : false;
+        this.persistence.recordPlayerResult(p.guestId, p.nickname, p.role, won);
+      }
+    } catch (err) {
+      console.error('Falha ao registrar partida no histórico:', err);
+    }
   }
 
   public handleConnection(socket: WebSocket): void {
@@ -170,8 +271,29 @@ export class RoomManager {
             return;
           }
           room.engine.startMatch();
+          room.matchRecorded = false;
           this.broadcastRoom(room.engine.roomId);
         });
+      case 'profile.get': {
+        const guestId = (msg.payload.guestId || '').slice(0, 64);
+        if (!this.persistence || !guestId) return;
+        const profile = this.persistence.getProfile(guestId);
+        this.sendSocket(socket, {
+          type: 'profile.data',
+          payload: {
+            profile: profile
+              ? {
+                  nickname: profile.nickname,
+                  matchesPlayed: profile.matchesPlayed,
+                  wins: profile.wins,
+                  roleStats: profile.roleStats as Record<string, { played: number; wins: number }>,
+                }
+              : null,
+            recentMatches: this.persistence.recentMatches(5),
+          },
+        });
+        return;
+      }
       case 'role.confirm':
         return this.withRoom(socket, (room, client) => {
           if (room.engine.phase !== GamePhase.ROLE_REVEAL) return;
@@ -267,6 +389,7 @@ export class RoomManager {
         return this.withHost(socket, GamePhase.FINISHED, room => {
           room.engine.resetForRematch();
           room.chatHistory = [];
+          room.matchRecorded = false;
           this.broadcastChatHistory(room);
           this.broadcastRoom(room.engine.roomId);
         });
@@ -277,7 +400,7 @@ export class RoomManager {
 
   private onRoomCreate(
     socket: WebSocket,
-    payload: { nickname: string; avatarId: string; config?: Partial<RoomConfig> }
+    payload: { nickname: string; avatarId: string; config?: Partial<RoomConfig>; guestId?: string }
   ): void {
     const roomId = `room-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const roomCode = this.generateRoomCode();
@@ -291,7 +414,15 @@ export class RoomManager {
     const playerId = `player-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const sessionId = `sess-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 
-    engine.addPlayer(playerId, sessionId, payload.nickname.trim() || 'Anfitrião', payload.avatarId || 'avatar-1', true, false);
+    engine.addPlayer(
+      playerId,
+      sessionId,
+      payload.nickname.trim() || 'Anfitrião',
+      payload.avatarId || 'avatar-1',
+      true,
+      false,
+      payload.guestId
+    );
     engine.setPlayerReady(playerId, true);
 
     const room: RoomRuntime = {
@@ -303,6 +434,8 @@ export class RoomManager {
       lastActivity: Date.now(),
       voiceReady: new Set(),
       voiceSig: '',
+      dirty: true,
+      matchRecorded: false,
     };
     this.rooms.set(roomId, room);
     this.roomByCode.set(roomCode, roomId);
@@ -314,7 +447,7 @@ export class RoomManager {
 
   private onRoomJoin(
     socket: WebSocket,
-    payload: { roomCode: string; nickname: string; avatarId: string; sessionId?: string }
+    payload: { roomCode: string; nickname: string; avatarId: string; sessionId?: string; guestId?: string }
   ): void {
     const normalizedCode = (payload.roomCode || '').trim().toUpperCase();
     const roomId = this.roomByCode.get(normalizedCode);
@@ -350,10 +483,12 @@ export class RoomManager {
         payload.nickname.trim() || `Morador ${engine.players.size + 1}`,
         payload.avatarId || 'avatar-1',
         false,
-        false
+        false,
+        payload.guestId
       );
     } else {
       player.isConnected = true;
+      if (payload.guestId) player.guestId = payload.guestId;
       // Remove entradas de sockets antigos deste mesmo jogador
       for (const [oldSocket, oldClient] of this.clients.entries()) {
         if (oldClient.playerId === player.id && oldSocket !== socket) {
@@ -419,6 +554,7 @@ export class RoomManager {
 
     room.chatHistory.push(chatMsg);
     room.lastActivity = Date.now();
+    room.dirty = true;
 
     // Vivos nunca recebem o canal dos mortos
     for (const [cliSocket, cliData] of this.clients.entries()) {
@@ -473,6 +609,9 @@ export class RoomManager {
 
       // Mortes mudam o canal de voz (vivos ↔ cemitério)
       this.syncVoicePeers(room);
+
+      // Fim de partida vira histórico + estatísticas (uma única vez)
+      this.recordFinishedMatch(room);
 
       this.broadcastRoom(roomId);
     }
@@ -660,6 +799,7 @@ export class RoomManager {
       if (!hasConnectedHuman && now - room.lastActivity > ROOM_IDLE_EXPIRE_MS) {
         this.roomByCode.delete(room.engine.roomCode);
         this.rooms.delete(roomId);
+        this.persistence?.deleteRoom(roomId);
       }
     }
   }
@@ -696,6 +836,7 @@ export class RoomManager {
   private broadcastRoom(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
+    room.dirty = true;
     for (const [socket, client] of this.clients.entries()) {
       if (client.roomId === roomId) {
         this.sendPrivateSnapshot(socket, room.engine, client.playerId);

@@ -78,6 +78,8 @@ export type DeathReason = 'ASSASSIN_ATTACK' | 'WITCH_POTION' | 'VOTED_OUT' | 'DI
 export interface Player {
   id: string;
   sessionId: string;
+  /** Identidade persistente do navegador (estatísticas entre partidas). */
+  guestId?: string;
   nickname: string;
   avatarId: string;
   isHost: boolean;
