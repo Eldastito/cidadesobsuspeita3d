@@ -65,6 +65,10 @@ export class AvatarRig {
   private emoteSprite: THREE.Sprite | null = null;
   private emoteT = 0;
 
+  // Indicador de fala (voz ativa)
+  private speakingSprite: THREE.Sprite | null = null;
+  private isSpeaking = false;
+
   // Gesto de apontar (voto declarado em voz alta)
   private pointT = 0;
   private pointTarget = new THREE.Vector3();
@@ -222,6 +226,23 @@ export class AvatarRig {
     this.pointT = durationSeconds;
   }
 
+  /** Liga/desliga o indicador de fala (🔊 sobre a cabeça). */
+  public setSpeaking(speaking: boolean): void {
+    if (speaking === this.isSpeaking) return;
+    this.isSpeaking = speaking;
+    if (speaking && !this.speakingSprite) {
+      this.speakingSprite = makeEmojiSprite('🔊');
+      this.speakingSprite.scale.set(0.45, 0.45, 1);
+      this.speakingSprite.position.set(-0.5, this.state.isAlive ? 2.15 : 1.9, 0);
+      this.group.add(this.speakingSprite);
+    } else if (!speaking && this.speakingSprite) {
+      this.group.remove(this.speakingSprite);
+      this.speakingSprite.material.map?.dispose();
+      this.speakingSprite.material.dispose();
+      this.speakingSprite = null;
+    }
+  }
+
   /** Aplica mudanças de estado vindas do snapshot (diff, sem rebuild). */
   public refreshVisualState(next: AvatarVisualState, force = false): void {
     const prev = this.state;
@@ -367,6 +388,14 @@ export class AvatarRig {
     // Fator de caminhada suavizado
     const moving = dist > WALK_EPSILON ? 1 : 0;
     this.walkAmount += (moving - this.walkAmount) * Math.min(1, dt * 6);
+
+    // Indicador de fala pulsa suavemente
+    if (this.speakingSprite) {
+      const pulse = 0.42 + Math.sin(elapsed * 8) * 0.06;
+      this.speakingSprite.scale.set(pulse, pulse, 1);
+      (this.speakingSprite.material as THREE.SpriteMaterial).opacity =
+        0.75 + Math.sin(elapsed * 8) * 0.25;
+    }
 
     // Balão de reação: pop de entrada e fade de saída
     if (this.emoteSprite) {
@@ -514,6 +543,10 @@ export class AvatarRig {
     if (this.emoteSprite) {
       this.emoteSprite.material.map?.dispose();
       this.emoteSprite.material.dispose();
+    }
+    if (this.speakingSprite) {
+      this.speakingSprite.material.map?.dispose();
+      this.speakingSprite.material.dispose();
     }
     // Geometrias/materiais são compartilhados — não descartar aqui.
   }

@@ -6,6 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { GamePhase } from './engine/types.ts';
 import { useGameClient } from './services/gameClient.ts';
+import { useVoiceChat } from './services/voiceClient.ts';
+import { VoiceBar } from './components/Voice/VoiceBar.tsx';
 import { Navbar } from './components/Navigation/Navbar.tsx';
 import { LobbyView } from './components/Lobby/LobbyView.tsx';
 import { TownSquare3D } from './components/3D/TownSquare3D.tsx';
@@ -22,6 +24,7 @@ import { AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
   const {
+    isConnected,
     isConnecting,
     snapshot,
     chatMessages,
@@ -30,6 +33,7 @@ export default function App() {
     viewMode,
     narratorCaption,
     movementBus,
+    voiceBus,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -77,6 +81,13 @@ export default function App() {
     ? snapshot?.room.lastVotingSummary?.eliminatedPlayerId ?? null
     : null;
 
+  // Voz: microfone dos vivos silencia à noite (sigilo de timing);
+  // o cemitério pode conversar a qualquer hora.
+  const localAlive = snapshot?.player.isAlive ?? true;
+  const isNightPhase = isNight || isRoleReveal;
+  const micAllowedByPhase = !isNightPhase || !localAlive;
+  const voice = useVoiceChat(voiceBus, snapshot?.player.id ?? null, micAllowedByPhase, isConnected);
+
   return (
     <div className="min-h-screen text-slate-300 flex flex-col selection:bg-lantern-400 selection:text-ink-950">
       <Navbar
@@ -121,6 +132,17 @@ export default function App() {
             viewMode={viewMode}
             selectedTargetId={selectedTargetId}
             onSelectPlayer={setSelectedTargetId}
+            speakingIds={voice.speakingIds}
+            voiceBar={
+              snapshot ? (
+                <VoiceBar
+                  voice={voice}
+                  players={snapshot.room.players}
+                  localPlayerId={snapshot.player.id}
+                  isNightMuted={false}
+                />
+              ) : null
+            }
           />
         ) : isFinished && snapshot ? (
           <PostGameReplay snapshot={snapshot} onRestartMatch={restartMatch} />
@@ -138,6 +160,7 @@ export default function App() {
                     onSelectPlayer={setSelectedTargetId}
                     movementBus={movementBus}
                     eliminatedPlayerId={eliminatedPlayerId}
+                    speakingIds={voice.speakingIds}
                   />
                 ) : (
                   <TownSquare2D
@@ -189,8 +212,14 @@ export default function App() {
               )}
             </div>
 
-            {/* Coluna social: chat + fila de fala */}
-            <div className="lg:col-span-4 flex flex-col h-full min-h-[420px]">
+            {/* Coluna social: voz + chat + fila de fala */}
+            <div className="lg:col-span-4 flex flex-col h-full min-h-[420px] gap-3">
+              <VoiceBar
+                voice={voice}
+                players={snapshot.room.players}
+                localPlayerId={snapshot.player.id}
+                isNightMuted={isNightPhase && localAlive}
+              />
               <ChatDrawer
                 snapshot={snapshot}
                 messages={chatMessages}

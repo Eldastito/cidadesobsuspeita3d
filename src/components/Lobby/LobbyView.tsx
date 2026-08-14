@@ -39,6 +39,10 @@ interface LobbyViewProps {
   viewMode: '3D' | '2D';
   selectedTargetId: string | null;
   onSelectPlayer: (playerId: string) => void;
+  /** Falantes na voz (indicador 🔊 na praça). */
+  speakingIds?: ReadonlySet<string>;
+  /** Barra de voz pronta, renderizada na coluna lateral. */
+  voiceBar?: React.ReactNode;
 }
 
 const AVATAR_OPTIONS = [
@@ -69,6 +73,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   viewMode,
   selectedTargetId,
   onSelectPlayer,
+  speakingIds,
+  voiceBar,
 }) => {
   const [nickname, setNickname] = useState(
     () => NICKNAME_SUGGESTIONS[Math.floor(Math.random() * NICKNAME_SUGGESTIONS.length)]
@@ -308,6 +314,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               selectedTargetId={selectedTargetId}
               onSelectPlayer={onSelectPlayer}
               movementBus={movementBus}
+              speakingIds={speakingIds}
             />
           ) : (
             <TownSquare2D
@@ -323,6 +330,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
       {/* Painel da sala */}
       <div className="lg:col-span-5 flex flex-col gap-3">
+        {voiceBar}
         {/* Moradores */}
         <div className="bg-ink-900 border border-white/5 rounded-2xl overflow-hidden shadow-lg">
           <div className="p-3 border-b border-white/5 flex items-center justify-between">

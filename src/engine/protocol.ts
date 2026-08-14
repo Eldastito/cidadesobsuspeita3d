@@ -60,7 +60,16 @@ export type ClientMessage =
   | { type: 'chat.send'; payload: { text: string } }
   | { type: 'bot.fill'; payload: { count: number } }
   | { type: 'bot.remove'; payload?: {} }
-  | { type: 'match.restart'; payload?: {} };
+  | { type: 'match.restart'; payload?: {} }
+  /** Entra no canal de voz da sala (vivos ou cemitério, decidido no servidor). */
+  | { type: 'voice.join'; payload?: {} }
+  /** Sai do canal de voz. */
+  | { type: 'voice.leave'; payload?: {} }
+  /**
+   * Sinalização WebRTC (SDP/ICE) retransmitida a um par elegível.
+   * O servidor só encaminha entre membros do MESMO canal de voz.
+   */
+  | { type: 'voice.signal'; payload: { targetId: string; data: unknown } };
 
 export type ServerMessage =
   | { type: 'snapshot.private'; payload: PrivatePlayerSnapshot }
@@ -86,4 +95,11 @@ export type ServerMessage =
       payload: { clientActionId: string; accepted: boolean; message?: string };
     }
   | { type: 'room.left'; payload?: {} }
+  /**
+   * Pares do seu canal de voz (recalculado em morte, entrada e saída).
+   * Conecte-se APENAS a esses ids; `channel` é informativo para a UI.
+   */
+  | { type: 'voice.peers'; payload: { channel: 'ALIVE' | 'DEAD'; peerIds: string[] } }
+  /** Sinalização WebRTC vinda de um par autorizado. */
+  | { type: 'voice.signal'; payload: { fromId: string; data: unknown } }
   | { type: 'error.safe'; payload: { code: string; message: string } };
