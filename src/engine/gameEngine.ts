@@ -26,6 +26,29 @@ import { generateRoleDeck, securePick, secureShuffle, validateComposition } from
 
 const MAX_SEATS = 16;
 
+/** Estado completo do motor, serializável para persistência. */
+export interface SerializedEngine {
+  version: 1;
+  roomId: string;
+  roomCode: string;
+  config: RoomConfig;
+  phase: GamePhase;
+  roundNumber: number;
+  phaseTimeRemaining: number;
+  phaseDuration: number;
+  players: Player[];
+  winner: VictoryWinner | null;
+  dawnSummary: DawnSummary | null;
+  lastVotingSummary: VotingSummary | null;
+  timeline: TimelineEvent[];
+  pendingNightActions: Array<[string, NightSubmission]>;
+  pendingVotes: Array<[string, string | null]>;
+  tieCandidateIds: string[];
+  voteOrder: string[];
+  currentVoterIndex: number;
+  eventSeq: number;
+}
+
 export class GameEngine {
   public roomId: string;
   public roomCode: string;
@@ -67,7 +90,8 @@ export class GameEngine {
     nickname: string,
     avatarId: string,
     isHost: boolean,
-    isBot: boolean = false
+    isBot: boolean = false,
+    guestId?: string
   ): Player {
     const existing = this.players.get(id);
     if (existing) {
@@ -75,6 +99,7 @@ export class GameEngine {
       existing.nickname = nickname;
       existing.avatarId = avatarId;
       existing.isConnected = true;
+      if (guestId) existing.guestId = guestId;
       return existing;
     }
 
@@ -87,6 +112,7 @@ export class GameEngine {
     const newPlayer: Player = {
       id,
       sessionId,
+      guestId,
       nickname,
       avatarId,
       isHost,
@@ -897,6 +923,60 @@ export class GameEngine {
     if (this.winner) return;
     this.roundNumber += 1;
     this.startNight();
+  }
+
+  // ── Persistência ─────────────────────────────────────────────────────────
+
+  /** Estado completo para persistência (JSON puro, sem Maps). */
+  public serialize(): SerializedEngine {
+    return {
+      version: 1,
+      roomId: this.roomId,
+      roomCode: this.roomCode,
+      config: this.config,
+      phase: this.phase,
+      roundNumber: this.roundNumber,
+      phaseTimeRemaining: this.phaseTimeRemaining,
+      phaseDuration: this.phaseDuration,
+      players: Array.from(this.players.values()),
+      winner: this.winner,
+      dawnSummary: this.dawnSummary,
+      lastVotingSummary: this.lastVotingSummary,
+      timeline: this.timeline,
+      pendingNightActions: Array.from(this.pendingNightActions.entries()),
+      pendingVotes: Array.from(this.pendingVotes.entries()),
+      tieCandidateIds: this.tieCandidateIds,
+      voteOrder: this.voteOrder,
+      currentVoterIndex: this.currentVoterIndex,
+      eventSeq: this.eventSeq,
+    };
+  }
+
+  /**
+   * Reconstrói o motor a partir de um estado serializado.
+   * Humanos voltam como desconectados (os sockets morreram com o processo
+   * antigo) e retomam pela sessão; bots continuam ativos.
+   */
+  public static restore(data: SerializedEngine, nowFn: () => number = () => Date.now()): GameEngine {
+    const engine = new GameEngine(data.roomId, data.roomCode, data.config, nowFn);
+    engine.phase = data.phase;
+    engine.roundNumber = data.roundNumber;
+    engine.phaseTimeRemaining = data.phaseTimeRemaining;
+    engine.phaseDuration = data.phaseDuration;
+    engine.winner = data.winner;
+    engine.dawnSummary = data.dawnSummary;
+    engine.lastVotingSummary = data.lastVotingSummary;
+    engine.timeline = data.timeline;
+    engine.tieCandidateIds = data.tieCandidateIds;
+    engine.voteOrder = data.voteOrder;
+    engine.currentVoterIndex = data.currentVoterIndex;
+    engine.eventSeq = data.eventSeq;
+    data.players.forEach(p => {
+      engine.players.set(p.id, { ...p, isConnected: p.isBot });
+    });
+    data.pendingNightActions.forEach(([id, action]) => engine.pendingNightActions.set(id, action));
+    data.pendingVotes.forEach(([id, target]) => engine.pendingVotes.set(id, target));
+    return engine;
   }
 
   // ── Utilidades ───────────────────────────────────────────────────────────

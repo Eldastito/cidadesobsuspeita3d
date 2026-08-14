@@ -32,6 +32,7 @@ export default function App() {
     selectedTargetId,
     viewMode,
     narratorCaption,
+    profileData,
     movementBus,
     voiceBus,
     createRoom,
@@ -133,6 +134,7 @@ export default function App() {
             selectedTargetId={selectedTargetId}
             onSelectPlayer={setSelectedTargetId}
             speakingIds={voice.speakingIds}
+            profileData={profileData}
             voiceBar={
               snapshot ? (
                 <VoiceBar

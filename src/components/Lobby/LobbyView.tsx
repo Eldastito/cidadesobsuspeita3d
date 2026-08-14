@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { GamePhase, PrivatePlayerSnapshot, Role, RoomConfig, VotingMode } from '../../engine/types.ts';
 import { getRecommendedRoles, ROLE_METADATA, validateComposition } from '../../engine/rules.ts';
-import { MovementBus } from '../../services/gameClient.ts';
+import { MovementBus, ProfileData } from '../../services/gameClient.ts';
 import { TownSquare3D } from '../3D/TownSquare3D.tsx';
 import { TownSquare2D } from '../2D/TownSquare2D.tsx';
 
@@ -43,6 +43,8 @@ interface LobbyViewProps {
   speakingIds?: ReadonlySet<string>;
   /** Barra de voz pronta, renderizada na coluna lateral. */
   voiceBar?: React.ReactNode;
+  /** Estatísticas persistentes deste navegador + últimas partidas da vila. */
+  profileData?: ProfileData | null;
 }
 
 const AVATAR_OPTIONS = [
@@ -75,6 +77,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onSelectPlayer,
   speakingIds,
   voiceBar,
+  profileData,
 }) => {
   const [nickname, setNickname] = useState(
     () => NICKNAME_SUGGESTIONS[Math.floor(Math.random() * NICKNAME_SUGGESTIONS.length)]
@@ -191,6 +194,70 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Perfil persistente do morador (estatísticas entre partidas) */}
+          {profileData?.profile && profileData.profile.matchesPlayed > 0 && (
+            <div className="bg-ink-900/80 border border-white/5 rounded-2xl p-4 space-y-2.5 backdrop-blur">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                Sua história na vila
+              </span>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-ink-950/60 border border-white/5">
+                  <div className="text-lg font-bold text-white">{profileData.profile.matchesPlayed}</div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">partidas</div>
+                </div>
+                <div className="p-2 rounded-xl bg-ink-950/60 border border-white/5">
+                  <div className="text-lg font-bold text-emerald-400">{profileData.profile.wins}</div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">vitórias</div>
+                </div>
+                <div className="p-2 rounded-xl bg-ink-950/60 border border-white/5">
+                  <div className="text-lg font-bold text-lantern-300">
+                    {Math.round((profileData.profile.wins / profileData.profile.matchesPlayed) * 100)}%
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">aproveitamento</div>
+                </div>
+              </div>
+              {(() => {
+                const entries = Object.entries(profileData.profile!.roleStats) as Array<
+                  [string, { played: number; wins: number }]
+                >;
+                if (entries.length === 0) return null;
+                const [topRole] = entries.sort((a, b) => b[1].played - a[1].played);
+                const meta = ROLE_METADATA[topRole[0] as Role];
+                if (!meta) return null;
+                return (
+                  <p className="text-[11px] text-slate-400">
+                    Papel mais vivido:{' '}
+                    <span className="font-semibold" style={{ color: meta.color }}>
+                      {meta.emoji} {meta.name}
+                    </span>{' '}
+                    ({topRole[1].played}× · {topRole[1].wins} vitórias)
+                  </p>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Últimas partidas da vila (histórico global) */}
+          {(profileData?.recentMatches?.length ?? 0) > 0 && (
+            <div className="bg-ink-900/60 border border-white/5 rounded-2xl p-3 space-y-1.5 backdrop-blur">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+                Últimas partidas da vila
+              </span>
+              {profileData!.recentMatches.slice(0, 3).map((m, i) => (
+                <div key={i} className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>
+                    {m.winner === 'CIDADE' ? '🏆 Cidade venceu' : m.winner === 'ASSASSINOS' ? '🗡️ Assassinos venceram' : '⚖️ Empate'}
+                    {' · '}
+                    {m.playerCount} jogadores · {m.rounds} {m.rounds === 1 ? 'dia' : 'dias'}
+                  </span>
+                  <span className="text-slate-600">
+                    {new Date(m.finishedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <p className="text-center text-[10px] text-slate-600">
             5 a 12 jogadores • funciona no celular • sem instalação

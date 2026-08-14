@@ -12,10 +12,34 @@ import {
   PrivatePlayerSnapshot,
   RoomConfig,
 } from '../engine/types.ts';
-import { ClientMessage, PlayerPositionMap, ServerMessage } from '../engine/protocol.ts';
+import {
+  ClientMessage,
+  PlayerPositionMap,
+  ProfileRecentMatch,
+  ProfileStats,
+  ServerMessage,
+} from '../engine/protocol.ts';
 import { sound } from './soundEffects.ts';
 
 const STORAGE_KEY = 'cidade-sob-suspeita:session';
+const GUEST_KEY = 'cidade-sob-suspeita:guest-id';
+
+/** Identidade persistente do navegador — dá continuidade às estatísticas. */
+function getGuestId(): string {
+  try {
+    let id = localStorage.getItem(GUEST_KEY);
+    if (!id) {
+      id =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `guest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(GUEST_KEY, id);
+    }
+    return id;
+  } catch {
+    return `guest-anon-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
 
 interface StoredSession {
   roomCode: string;
@@ -47,6 +71,11 @@ export interface NarratorCaption {
   key: number;
 }
 
+export interface ProfileData {
+  profile: ProfileStats | null;
+  recentMatches: ProfileRecentMatch[];
+}
+
 export interface GameClientState {
   isConnected: boolean;
   isConnecting: boolean;
@@ -56,6 +85,7 @@ export interface GameClientState {
   selectedTargetId: string | null;
   viewMode: '3D' | '2D';
   narratorCaption: NarratorCaption | null;
+  profileData: ProfileData | null;
 }
 
 export interface EmoteEvent {
@@ -103,6 +133,7 @@ export function useGameClient() {
     selectedTargetId: null,
     viewMode: '3D',
     narratorCaption: null,
+    profileData: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -166,6 +197,8 @@ export function useGameClient() {
             } else if (snapshot.room.winner === 'ASSASSINOS') {
               narrate('Os assassinos triunfaram e dominaram a cidade!');
             }
+            // Atualiza as estatísticas persistentes após o registro no servidor
+            setTimeout(() => send({ type: 'profile.get', payload: { guestId: getGuestId() } }), 1500);
           }
         }
 
@@ -193,6 +226,11 @@ export function useGameClient() {
 
       case 'player.emote.shown': {
         emoteListenersRef.current.forEach(cb => cb(msg.payload));
+        break;
+      }
+
+      case 'profile.data': {
+        setState(prev => ({ ...prev, profileData: msg.payload }));
         break;
       }
 
@@ -265,6 +303,10 @@ export function useGameClient() {
 
     ws.onopen = () => {
       setState(prev => ({ ...prev, isConnected: true, isConnecting: false }));
+      // Perfil persistente (estatísticas e últimas partidas)
+      ws.send(
+        JSON.stringify({ type: 'profile.get', payload: { guestId: getGuestId() } } satisfies ClientMessage)
+      );
       // Retomada automática após queda: reentra na sala com a mesma sessão
       const stored = storedSessionRef.current;
       if (stored) {
@@ -276,6 +318,7 @@ export function useGameClient() {
               nickname: stored.nickname,
               avatarId: stored.avatarId,
               sessionId: stored.sessionId,
+              guestId: getGuestId(),
             },
           } satisfies ClientMessage)
         );
@@ -318,12 +361,12 @@ export function useGameClient() {
 
   const createRoom = (nickname: string, avatarId: string, config?: Partial<RoomConfig>) => {
     pendingIdentityRef.current = { nickname, avatarId };
-    send({ type: 'room.create', payload: { nickname, avatarId, config } });
+    send({ type: 'room.create', payload: { nickname, avatarId, config, guestId: getGuestId() } });
   };
 
   const joinRoom = (roomCode: string, nickname: string, avatarId: string) => {
     pendingIdentityRef.current = { nickname, avatarId };
-    send({ type: 'room.join', payload: { roomCode, nickname, avatarId } });
+    send({ type: 'room.join', payload: { roomCode, nickname, avatarId, guestId: getGuestId() } });
   };
 
   const leaveRoom = () => send({ type: 'room.leave' });

@@ -80,6 +80,13 @@ Durante a **noite**, todos os avatares voltam a seus assentos e dormem — o mov
 
 Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, **voz WebRTC** com canal dos vivos e cemitério isolado (malha P2P, ver [ADR 001](docs/adr/001-voz-webrtc-malha.md)), chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
 
+### Persistência (Fase 4)
+
+- **Reiniciar o servidor não mata as partidas**: as salas são gravadas em SQLite embutido (`data/cidade.db`, via `node:sqlite` — zero dependências) e restauradas no boot; os jogadores reconectam sozinhos e a partida continua ([ADR 002](docs/adr/002-persistencia-sqlite.md)).
+- **Histórico de partidas**: vencedor, papéis e rodadas de cada partida concluída.
+- **Perfil por navegador**: identidade anônima de convidado (sem e-mail/senha) acumula partidas, vitórias e estatísticas por papel — visível na tela inicial.
+- Caminho de migração para PostgreSQL documentado no ADR (camada `Persistence` com interface estreita).
+
 ### Voz (Fase 3)
 
 - **Opcional e resiliente**: sem microfone ou sem conexão P2P possível, o jogo continua por texto.

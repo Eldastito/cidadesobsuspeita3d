@@ -16,6 +16,22 @@ export const PROTOCOL_VERSION = '2.0.0';
 export type PlayerPosition = [number, number, number];
 export type PlayerPositionMap = Record<string, PlayerPosition>;
 
+/** Estatísticas persistentes de um convidado (por navegador). */
+export interface ProfileStats {
+  nickname: string;
+  matchesPlayed: number;
+  wins: number;
+  roleStats: Record<string, { played: number; wins: number }>;
+}
+
+export interface ProfileRecentMatch {
+  roomCode: string;
+  finishedAt: number;
+  winner: string;
+  playerCount: number;
+  rounds: number;
+}
+
 export type ClientMessage =
   | {
       type: 'room.create';
@@ -23,6 +39,8 @@ export type ClientMessage =
         nickname: string;
         avatarId: string;
         config?: Partial<RoomConfig>;
+        /** Identidade persistente do navegador (estatísticas). */
+        guestId?: string;
       };
     }
   | {
@@ -33,7 +51,13 @@ export type ClientMessage =
         avatarId: string;
         /** Presente ao retomar sessão após queda de conexão. */
         sessionId?: string;
+        guestId?: string;
       };
+    }
+  | {
+      /** Pede o perfil persistente e as últimas partidas da vila. */
+      type: 'profile.get';
+      payload: { guestId: string };
     }
   | { type: 'room.leave'; payload?: {} }
   | { type: 'room.updateConfig'; payload: { config: Partial<RoomConfig> } }
@@ -95,6 +119,10 @@ export type ServerMessage =
       payload: { clientActionId: string; accepted: boolean; message?: string };
     }
   | { type: 'room.left'; payload?: {} }
+  | {
+      type: 'profile.data';
+      payload: { profile: ProfileStats | null; recentMatches: ProfileRecentMatch[] };
+    }
   /**
    * Pares do seu canal de voz (recalculado em morte, entrada e saída).
    * Conecte-se APENAS a esses ids; `channel` é informativo para a UI.
