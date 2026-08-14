@@ -1,6 +1,7 @@
 /**
- * Cidade Sob Suspeita 3D - Lobby View (High Density Theme)
- * Room Creation, Room Joining, Player Deck Balancing, and Bot Fillers
+ * Cidade Sob Suspeita 3D — Lobby
+ * Tela de chegada (criar/entrar) e sala de espera com a praça 3D ao vivo,
+ * composição de papéis editável e resumo de regras visível antes do "pronto".
  */
 
 import React, { useState } from 'react';
@@ -9,36 +10,49 @@ import {
   CheckCircle,
   Copy,
   Crown,
+  Minus,
   Play,
   Plus,
-  RefreshCw,
-  Settings,
-  Shield,
+  ScrollText,
   Trash2,
   UserCheck,
   Users,
+  WifiOff,
 } from 'lucide-react';
-import { PrivatePlayerSnapshot, Role, RoomConfig } from '../../engine/types.ts';
-import { getRecommendedRoles, ROLE_METADATA } from '../../engine/rules.ts';
+import { GamePhase, PrivatePlayerSnapshot, Role, RoomConfig } from '../../engine/types.ts';
+import { getRecommendedRoles, ROLE_METADATA, validateComposition } from '../../engine/rules.ts';
+import { MovementBus } from '../../services/gameClient.ts';
+import { TownSquare3D } from '../3D/TownSquare3D.tsx';
+import { TownSquare2D } from '../2D/TownSquare2D.tsx';
 
 interface LobbyViewProps {
   snapshot: PrivatePlayerSnapshot | null;
   onCreateRoom: (nickname: string, avatarId: string, config?: Partial<RoomConfig>) => void;
   onJoinRoom: (roomCode: string, nickname: string, avatarId: string) => void;
-  onUpdateConfig: (config: RoomConfig) => void;
+  onUpdateConfig: (config: Partial<RoomConfig>) => void;
   onSetReady: (isReady: boolean) => void;
   onStartMatch: () => void;
   onFillBots: (count: number) => void;
   onRemoveBots: () => void;
+  onOpenRules: () => void;
+  movementBus: MovementBus;
+  viewMode: '3D' | '2D';
+  selectedTargetId: string | null;
+  onSelectPlayer: (playerId: string) => void;
 }
 
 const AVATAR_OPTIONS = [
-  { id: 'avatar-1', emoji: '🕵️', label: 'Detetive' },
-  { id: 'avatar-2', emoji: '🧑‍⚕️', label: 'Médico' },
-  { id: 'avatar-3', emoji: '🧙‍♀️', label: 'Bruxa' },
-  { id: 'avatar-4', emoji: '🤵', label: 'Cidadão' },
-  { id: 'avatar-5', emoji: '🎭', label: 'Misterioso' },
-  { id: 'avatar-6', emoji: '👑', label: 'Prefeito' },
+  { id: 'avatar-1', emoji: '🧢', label: 'Boina' },
+  { id: 'avatar-2', emoji: '🙂', label: 'Sem chapéu' },
+  { id: 'avatar-3', emoji: '🧙', label: 'Chapéu de mago' },
+  { id: 'avatar-4', emoji: '🎩', label: 'Cartola' },
+  { id: 'avatar-5', emoji: '🥷', label: 'Capuz' },
+  { id: 'avatar-6', emoji: '👒', label: 'Chapéu de palha' },
+];
+
+const NICKNAME_SUGGESTIONS = [
+  'Aurora', 'Baltazar', 'Celeste', 'Dorival', 'Esmeralda', 'Firmino',
+  'Guiomar', 'Horácio', 'Iolanda', 'Jacinto', 'Leonor', 'Martim',
 ];
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
@@ -50,121 +64,143 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onStartMatch,
   onFillBots,
   onRemoveBots,
+  onOpenRules,
+  movementBus,
+  viewMode,
+  selectedTargetId,
+  onSelectPlayer,
 }) => {
-  const [nickname, setNickname] = useState('Agente ' + Math.floor(10 + Math.random() * 90));
+  const [nickname, setNickname] = useState(
+    () => NICKNAME_SUGGESTIONS[Math.floor(Math.random() * NICKNAME_SUGGESTIONS.length)]
+  );
   const [selectedAvatar, setSelectedAvatar] = useState('avatar-1');
   const [joinCode, setJoinCode] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // If not inside a room yet: Landing Screen
+  // ── Tela de chegada ──────────────────────────────────────────────────────
   if (!snapshot) {
     return (
-      <div className="min-h-[calc(100vh-60px)] flex items-center justify-center p-3 sm:p-4 bg-[#0A0B0E]">
-        <div className="w-full max-w-md bg-[#0F1116] border border-white/5 rounded-lg p-5 sm:p-6 shadow-2xl space-y-5">
-          {/* Header Title */}
-          <div className="border-b border-white/5 pb-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 bg-indigo-600 rounded flex items-center justify-center shadow-sm">
-                <div className="w-3.5 h-3.5 border-2 border-white rotate-45"></div>
-              </div>
-              <div>
-                <h1 className="text-sm font-bold text-white tracking-tight">CIDADE SOB SUSPEITA</h1>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-                  Game Session Initialization
-                </p>
-              </div>
+      <div className="min-h-[calc(100vh-56px)] flex items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-6">
+          {/* Marca */}
+          <div className="text-center space-y-2">
+            <div className="text-5xl leading-none select-none" aria-hidden>
+              🏘️🌙
             </div>
-            <p className="text-xs text-slate-400">
-              Protocolo de dedução social em tempo real. Crie uma nova sala ou acesse via código de sessão.
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-lantern-300 tracking-wide">
+              Cidade Sob Suspeita
+            </h1>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+              Uma vila 3D, papéis secretos e uma pergunta por rodada:
+              <span className="text-slate-200"> quem entre nós é o assassino?</span>
             </p>
           </div>
 
-          {/* Nickname Input */}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 font-mono">
-              IDENTIFICADOR DE JOGADOR
-            </label>
-            <input
-              type="text"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              placeholder="Digite seu codinome"
-              maxLength={20}
-              className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-            />
-          </div>
-
-          {/* Avatar Selector */}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5 font-mono">
-              SELEÇÃO DE AVATAR
-            </label>
-            <div className="grid grid-cols-6 gap-2">
-              {AVATAR_OPTIONS.map((av) => (
-                <button
-                  key={av.id}
-                  onClick={() => setSelectedAvatar(av.id)}
-                  title={av.label}
-                  className={`p-2 rounded border transition-all flex items-center justify-center text-xl ${
-                    selectedAvatar === av.id
-                      ? 'bg-indigo-500/20 border-indigo-500 ring-1 ring-indigo-500'
-                      : 'bg-black/30 border-white/5 hover:border-white/20'
-                  }`}
-                >
-                  {av.emoji}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Primary Action Buttons */}
-          <div className="space-y-3 pt-2">
-            <button
-              onClick={() => onCreateRoom(nickname, selectedAvatar)}
-              disabled={!nickname.trim()}
-              className="w-full py-2.5 px-4 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center gap-2"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              CRIAR NOVA SESSÃO
-            </button>
-
-            <div className="relative flex py-1 items-center">
-              <div className="flex-grow border-t border-white/5"></div>
-              <span className="flex-shrink mx-3 text-[10px] font-mono uppercase tracking-widest text-slate-600">
-                OU ACESSAR CÓDIGO
-              </span>
-              <div className="flex-grow border-t border-white/5"></div>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="CÓDIGO (EX: ABCD)"
-                maxLength={8}
-                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded text-xs font-mono uppercase text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-              />
-              <button
-                onClick={() => onJoinRoom(joinCode, nickname, selectedAvatar)}
-                disabled={!joinCode.trim() || !nickname.trim()}
-                className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200 border border-white/10 font-mono font-bold text-xs uppercase tracking-wider transition-colors"
+          <div className="bg-ink-900/90 border border-white/8 rounded-2xl p-5 shadow-2xl space-y-5 backdrop-blur">
+            {/* Apelido */}
+            <div>
+              <label
+                htmlFor="nickname"
+                className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-1.5"
               >
-                ENTRAR
+                Seu apelido na vila
+              </label>
+              <input
+                id="nickname"
+                type="text"
+                value={nickname}
+                onChange={e => setNickname(e.target.value)}
+                placeholder="Como querem te chamar?"
+                maxLength={20}
+                className="w-full px-3 py-2.5 bg-ink-950/80 border border-white/10 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-lantern-400/60 focus:ring-1 focus:ring-lantern-400/30 transition-colors"
+              />
+            </div>
+
+            {/* Avatar */}
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-1.5">
+                Estilo do seu morador
+              </span>
+              <div className="grid grid-cols-6 gap-2" role="radiogroup" aria-label="Escolha de avatar">
+                {AVATAR_OPTIONS.map(av => (
+                  <button
+                    key={av.id}
+                    role="radio"
+                    aria-checked={selectedAvatar === av.id}
+                    onClick={() => setSelectedAvatar(av.id)}
+                    title={av.label}
+                    className={`p-2 rounded-lg border transition-all flex items-center justify-center text-xl ${
+                      selectedAvatar === av.id
+                        ? 'bg-lantern-400/15 border-lantern-400/70 ring-1 ring-lantern-400/40'
+                        : 'bg-ink-950/60 border-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    {av.emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Ações */}
+            <div className="space-y-3 pt-1">
+              <button
+                onClick={() => onCreateRoom(nickname, selectedAvatar)}
+                disabled={!nickname.trim()}
+                className="w-full py-3 px-4 rounded-xl bg-lantern-400 hover:bg-lantern-300 disabled:opacity-40 text-ink-950 font-bold text-sm transition-colors shadow-lg shadow-lantern-500/10 flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Fundar uma nova vila
               </button>
+
+              <div className="relative flex py-0.5 items-center">
+                <div className="flex-grow border-t border-white/5" />
+                <span className="flex-shrink mx-3 text-[10px] uppercase tracking-[0.2em] text-slate-600">
+                  ou entre com um código
+                </span>
+                <div className="flex-grow border-t border-white/5" />
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={joinCode}
+                  onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && joinCode.trim() && nickname.trim()) {
+                      onJoinRoom(joinCode, nickname, selectedAvatar);
+                    }
+                  }}
+                  placeholder="CÓDIGO (EX: XK4P)"
+                  maxLength={8}
+                  aria-label="Código da sala"
+                  className="flex-1 px-3 py-2.5 bg-ink-950/80 border border-white/10 rounded-lg text-sm font-mono uppercase tracking-widest text-white placeholder-slate-600 focus:outline-none focus:border-lantern-400/60"
+                />
+                <button
+                  onClick={() => onJoinRoom(joinCode, nickname, selectedAvatar)}
+                  disabled={!joinCode.trim() || !nickname.trim()}
+                  className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200 border border-white/10 font-bold text-sm transition-colors"
+                >
+                  Entrar
+                </button>
+              </div>
             </div>
           </div>
+
+          <p className="text-center text-[10px] text-slate-600">
+            5 a 12 jogadores • funciona no celular • sem instalação
+          </p>
         </div>
       </div>
     );
   }
 
-  // Inside Active Lobby Screen
+  // ── Sala de espera ───────────────────────────────────────────────────────
   const isHost = snapshot.player.isHost;
   const players = snapshot.room.players;
   const config = snapshot.room.config;
-  const recommendedRoles = getRecommendedRoles(players.length);
-  const canStart = players.length >= config.minPlayers && players.every(p => p.isReady);
+  const me = players.find(p => p.id === snapshot.player.id);
+  const composition = validateComposition(players.length, config.rolesCount);
+  const canStart = players.length >= config.minPlayers && players.every(p => p.isReady) && composition.valid;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(snapshot.room.roomCode);
@@ -172,225 +208,308 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const patchRoles = (key: keyof RoomConfig['rolesCount'], delta: number, max: number) => {
+    const value = Math.max(0, Math.min(max, config.rolesCount[key] + delta));
+    onUpdateConfig({ rolesCount: { ...config.rolesCount, [key]: value } });
+  };
+
+  const roleRow = (
+    role: Role,
+    key: keyof RoomConfig['rolesCount'],
+    max: number,
+    minValue: number = 0
+  ) => {
+    const meta = ROLE_METADATA[role];
+    const count = config.rolesCount[key];
+    return (
+      <div
+        className="p-2 rounded-lg border flex items-center justify-between gap-2"
+        style={{ backgroundColor: `${meta.color}0d`, borderColor: `${meta.color}30` }}
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: meta.color }}>
+          <span aria-hidden>{meta.emoji}</span> {meta.name}
+        </span>
+        <div className="flex items-center gap-1.5">
+          {isHost && (
+            <button
+              onClick={() => patchRoles(key, -1, max)}
+              disabled={count <= minValue}
+              aria-label={`Diminuir ${meta.name}`}
+              className="p-1 rounded bg-black/30 border border-white/10 disabled:opacity-25 text-slate-300 hover:bg-white/10"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          )}
+          <span className="font-bold text-sm w-6 text-center" style={{ color: meta.color }}>
+            {count}
+          </span>
+          {isHost && (
+            <button
+              onClick={() => patchRoles(key, 1, max)}
+              disabled={count >= max}
+              aria-label={`Aumentar ${meta.name}`}
+              className="p-1 rounded bg-black/30 border border-white/10 disabled:opacity-25 text-slate-300 hover:bg-white/10"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const citizensCount = Math.max(
+    0,
+    players.length -
+      (config.rolesCount.assassins +
+        config.rolesCount.doctor +
+        config.rolesCount.detective +
+        config.rolesCount.witch)
+  );
+  const recommended = getRecommendedRoles(players.length);
+
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-4 space-y-3">
-      {/* Top Banner: Room Code & Status Bar */}
-      <div className="bg-[#0F1116] border border-white/5 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-lg">
-            🏰
+    <div className="flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-3.5 grid grid-cols-1 lg:grid-cols-12 gap-3">
+      {/* Praça ao vivo enquanto o grupo se forma */}
+      <div className="lg:col-span-7 flex flex-col gap-3">
+        <div className="bg-ink-900 border border-white/5 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl" aria-hidden>🏘️</span>
+            <div>
+              <h2 className="font-display text-sm font-bold text-lantern-300">Praça da Vila</h2>
+              <p className="text-[11px] text-slate-400">
+                {players.length}/{config.maxPlayers} moradores • mínimo {config.minPlayers} para começar
+              </p>
+            </div>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                SESSÃO DE ESPERA
-              </span>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold">
-                {players.length}/{config.maxPlayers} CIDADÃOS
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1.5 bg-ink-950/80 border border-white/10 rounded-lg flex items-center gap-2">
+              <span className="text-[10px] uppercase text-slate-500">Código</span>
+              <span className="text-base font-mono font-bold text-lantern-300 tracking-[0.2em]">
+                {snapshot.room.roomCode}
               </span>
             </div>
-            <p className="text-xs text-slate-300 font-medium mt-0.5">
-              Aguardando confirmação de prontidão de todos os jogadores para iniciar
-            </p>
+            <button
+              onClick={handleCopy}
+              title="Copiar código da sala"
+              className="p-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg border border-white/10 transition-colors"
+            >
+              {copied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+            </button>
           </div>
         </div>
 
-        {/* Room Code Badge */}
-        <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 bg-black/40 border border-white/10 rounded flex items-center gap-2">
-            <span className="text-[10px] font-mono uppercase text-slate-500">CÓDIGO:</span>
-            <span className="text-sm font-mono font-bold text-amber-400 tracking-widest">
-              {snapshot.room.roomCode}
-            </span>
-          </div>
-          <button
-            onClick={handleCopy}
-            title="Copiar código da sala"
-            className="p-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded border border-white/10 transition-colors"
-          >
-            {copied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-          </button>
+        <div className="flex-1 min-h-[320px] lg:min-h-[420px] bg-ink-900 border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+          {viewMode === '3D' ? (
+            <TownSquare3D
+              players={players}
+              localPlayerId={snapshot.player.id}
+              phase={GamePhase.LOBBY}
+              selectedTargetId={selectedTargetId}
+              onSelectPlayer={onSelectPlayer}
+              movementBus={movementBus}
+            />
+          ) : (
+            <TownSquare2D
+              players={players}
+              localPlayerId={snapshot.player.id}
+              phase={GamePhase.LOBBY}
+              selectedTargetId={selectedTargetId}
+              onSelectPlayer={onSelectPlayer}
+            />
+          )}
         </div>
       </div>
 
-      {/* Main Grid: Player Registry & Role Composition */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-        {/* Left 8 Cols: Player Registry */}
-        <div className="lg:col-span-8 bg-[#0F1116] border border-white/5 rounded-lg flex flex-col overflow-hidden">
+      {/* Painel da sala */}
+      <div className="lg:col-span-5 flex flex-col gap-3">
+        {/* Moradores */}
+        <div className="bg-ink-900 border border-white/5 rounded-2xl overflow-hidden shadow-lg">
           <div className="p-3 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-              <Users className="w-3.5 h-3.5 text-indigo-400" />
-              REGISTRO DE CIDADÃOS ({players.length})
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 flex items-center gap-2">
+              <Users className="w-3.5 h-3.5 text-lantern-400" />
+              Moradores ({players.length})
             </span>
-
-            {/* Ready Toggle */}
             <button
-              onClick={() => onSetReady(!snapshot.player.isHost ? !players.find(p => p.id === snapshot.player.id)?.isReady : true)}
-              className={`px-3 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
-                players.find(p => p.id === snapshot.player.id)?.isReady
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10'
+              onClick={() => onSetReady(!me?.isReady)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ${
+                me?.isReady
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-lantern-400 text-ink-950 hover:bg-lantern-300'
               }`}
             >
               <UserCheck className="w-3.5 h-3.5" />
-              {players.find(p => p.id === snapshot.player.id)?.isReady ? 'CONFIRMADO' : 'CONFIRMAR PRONTO'}
+              {me?.isReady ? 'Pronto!' : 'Estou pronto'}
             </button>
           </div>
 
-          {/* Grid of Players */}
-          <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
-            {players.map((p, idx) => (
+          <div className="p-2.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto">
+            {players.map(p => (
               <div
                 key={p.id}
-                className="p-2.5 bg-black/30 border border-white/5 hover:border-white/10 rounded flex items-center justify-between transition-colors"
+                className="px-2.5 py-2 bg-ink-950/60 border border-white/5 rounded-lg flex items-center justify-between gap-2"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded bg-white/5 border border-white/10 flex items-center justify-center text-sm font-mono text-slate-300">
-                    {p.isBot ? '🤖' : '👤'}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-white tracking-tight">{p.nickname}</span>
-                      {p.isHost && (
-                        <span title="Anfitrião" className="text-amber-400">
-                          <Crown className="w-3 h-3" />
-                        </span>
-                      )}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-base shrink-0" aria-hidden>
+                    {p.isBot ? '🤖' : AVATAR_OPTIONS.find(a => a.id === p.avatarId)?.emoji || '🙂'}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-semibold text-white truncate">{p.nickname}</span>
+                      {p.isHost && <Crown className="w-3 h-3 text-lantern-400 shrink-0" aria-label="Anfitrião" />}
+                      {!p.isConnected && <WifiOff className="w-3 h-3 text-rose-400 shrink-0" aria-label="Reconectando" />}
                     </div>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      #{p.seatNumber < 9 ? `0${p.seatNumber + 1}` : p.seatNumber + 1} {p.isBot ? '• BOT_AI' : '• LOCAL'}
+                    <span className="text-[10px] text-slate-500">
+                      {p.id === snapshot.player.id ? 'você' : p.isBot ? 'bot' : 'convidado'}
                     </span>
                   </div>
                 </div>
-
-                <div>
-                  {p.isReady ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-mono font-bold uppercase">
-                      PRONTO
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-white/5 border border-white/5 text-slate-500 text-[9px] font-mono uppercase">
-                      AGUARDANDO
-                    </span>
-                  )}
-                </div>
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                    p.isReady
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : 'bg-white/5 border border-white/5 text-slate-500'
+                  }`}
+                >
+                  {p.isReady ? 'pronto' : 'esperando'}
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Bot Fill Testing Bar */}
           {isHost && (
-            <div className="p-2.5 bg-black/40 border-t border-white/5 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                <Bot className="w-3 h-3 text-indigo-400" />
-                SIMULAÇÃO DE BOTS:
-              </div>
-              <div className="flex items-center gap-2">
+            <div className="p-2.5 bg-ink-950/60 border-t border-white/5 flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+                <Bot className="w-3 h-3 text-lantern-400" /> Completar com bots:
+              </span>
+              {[6, 8, 10].map(n => (
                 <button
-                  onClick={() => onFillBots(Math.max(1, 6 - players.length))}
-                  disabled={players.length >= 6}
-                  className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-30 text-[10px] font-mono font-bold text-slate-300 transition-colors"
+                  key={n}
+                  onClick={() => onFillBots(Math.max(1, n - players.length))}
+                  disabled={players.length >= n}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-30 text-[11px] font-bold text-slate-300 transition-colors"
                 >
-                  + PREENCHER 6
+                  até {n}
                 </button>
+              ))}
+              {players.some(p => p.isBot) && (
                 <button
-                  onClick={() => onFillBots(Math.max(1, 8 - players.length))}
-                  disabled={players.length >= 8}
-                  className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-30 text-[10px] font-mono font-bold text-slate-300 transition-colors"
+                  onClick={onRemoveBots}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[11px] font-bold transition-colors flex items-center gap-1"
                 >
-                  + PREENCHER 8
+                  <Trash2 className="w-3 h-3" /> limpar
                 </button>
-                {players.some(p => p.isBot) && (
-                  <button
-                    onClick={onRemoveBots}
-                    className="px-2.5 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-mono font-bold transition-colors flex items-center gap-1"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    LIMPAR BOTS
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Right 4 Cols: Role Composition & Start Button */}
-        <div className="lg:col-span-4 bg-[#0F1116] border border-white/5 rounded-lg flex flex-col justify-between overflow-hidden">
-          <div>
-            <div className="p-3 border-b border-white/5">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                <Shield className="w-3.5 h-3.5 text-indigo-400" />
-                COMPOSIÇÃO DE PAPÉIS
-              </span>
-            </div>
-
-            {/* List of Roles in this match */}
-            <div className="p-3 space-y-1.5 font-mono text-[11px]">
-              <div className="p-2 rounded bg-rose-500/5 border border-rose-500/20 flex items-center justify-between">
-                <span className="text-rose-300 flex items-center gap-1.5">
-                  <span>🔪</span> {ROLE_METADATA[Role.ASSASSINO].name}
-                </span>
-                <span className="font-bold text-rose-400 font-mono">{config.rolesCount.assassins}x</span>
-              </div>
-
-              <div className="p-2 rounded bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
-                <span className="text-emerald-300 flex items-center gap-1.5">
-                  <span>🧑‍⚕️</span> {ROLE_METADATA[Role.MEDICO].name}
-                </span>
-                <span className="font-bold text-emerald-400 font-mono">{config.rolesCount.doctor}x</span>
-              </div>
-
-              <div className="p-2 rounded bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
-                <span className="text-indigo-300 flex items-center gap-1.5">
-                  <span>🔍</span> {ROLE_METADATA[Role.DETETIVE].name}
-                </span>
-                <span className="font-bold text-indigo-400 font-mono">{config.rolesCount.detective}x</span>
-              </div>
-
-              <div className="p-2 rounded bg-purple-500/5 border border-purple-500/20 flex items-center justify-between">
-                <span className="text-purple-300 flex items-center gap-1.5">
-                  <span>🧙‍♀️</span> {ROLE_METADATA[Role.BRUXA].name}
-                </span>
-                <span className="font-bold text-purple-400 font-mono">{config.rolesCount.witch}x</span>
-              </div>
-
-              <div className="p-2 rounded bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
-                <span className="text-amber-300 flex items-center gap-1.5">
-                  <span>👥</span> {ROLE_METADATA[Role.CIDADAO].name}s
-                </span>
-                <span className="font-bold text-amber-400 font-mono">
-                  {Math.max(0, players.length - (config.rolesCount.assassins + config.rolesCount.doctor + config.rolesCount.detective + config.rolesCount.witch))}x
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Start Button */}
-          <div className="p-3 bg-black/40 border-t border-white/5 space-y-2">
-            {isHost ? (
+        {/* Papéis da partida */}
+        <div className="bg-ink-900 border border-white/5 rounded-2xl overflow-hidden shadow-lg">
+          <div className="p-3 border-b border-white/5 flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+              Papéis desta partida
+            </span>
+            {isHost && (
               <button
-                onClick={onStartMatch}
-                disabled={!canStart}
-                className="w-full py-2.5 px-4 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center gap-2"
+                onClick={() => onUpdateConfig({ rolesCount: recommended })}
+                className="text-[10px] text-lantern-300 hover:text-lantern-200 underline underline-offset-2"
               >
-                <Play className="w-3.5 h-3.5 fill-white" />
-                INICIAR PARTIDA
+                usar sugestão para {players.length}
               </button>
-            ) : (
-              <div className="text-center p-2.5 rounded bg-black/30 border border-white/5 font-mono text-[10px] text-slate-500">
-                AGUARDANDO ANFITRIÃO INICIAR...
-              </div>
-            )}
-
-            {players.length < config.minPlayers && (
-              <p className="text-[10px] font-mono text-amber-400 text-center">
-                Mínimo de {config.minPlayers} jogadores requeridos.
-              </p>
             )}
           </div>
+          <div className="p-2.5 space-y-1.5">
+            {roleRow(Role.ASSASSINO, 'assassins', 3, 1)}
+            {roleRow(Role.MEDICO, 'doctor', 1)}
+            {roleRow(Role.DETETIVE, 'detective', 1)}
+            {roleRow(Role.BRUXA, 'witch', 1)}
+            <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+                <span aria-hidden>🏠</span> Cidadãos
+              </span>
+              <span className="font-bold text-sm text-amber-300">{citizensCount}</span>
+            </div>
+            {!composition.valid && (
+              <p className="text-[11px] text-rose-400 pt-1">⚠️ {composition.reason}</p>
+            )}
+          </div>
+
+          {/* Opções da sala */}
+          <div className="px-2.5 pb-2.5 space-y-1.5 text-xs">
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">Prefeito desempata votações</span>
+              <input
+                type="checkbox"
+                checked={config.enableMayorTiebreak}
+                disabled={!isHost}
+                onChange={e =>
+                  onUpdateConfig({
+                    enableMayorTiebreak: e.target.checked,
+                    rolesCount: { ...config.rolesCount, mayor: e.target.checked ? 1 : 0 },
+                  })
+                }
+                className="accent-amber-400 w-4 h-4"
+              />
+            </label>
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">Revelar papel de quem morre</span>
+              <input
+                type="checkbox"
+                checked={config.revealRoleOnDeath}
+                disabled={!isHost}
+                onChange={e => onUpdateConfig({ revealRoleOnDeath: e.target.checked })}
+                className="accent-amber-400 w-4 h-4"
+              />
+            </label>
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">Debate (segundos)</span>
+              <select
+                value={config.discussionDurationSeconds}
+                disabled={!isHost}
+                onChange={e => onUpdateConfig({ discussionDurationSeconds: Number(e.target.value) })}
+                className="bg-ink-950 border border-white/10 rounded px-2 py-1 text-slate-200"
+              >
+                {[60, 90, 120, 180, 240, 300].map(s => (
+                  <option key={s} value={s}>
+                    {s}s
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        {/* Começar */}
+        <div className="bg-ink-900 border border-white/5 rounded-2xl p-3 shadow-lg space-y-2">
+          <button
+            onClick={onOpenRules}
+            className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+            Ler as regras desta sala
+          </button>
+          {isHost ? (
+            <button
+              onClick={onStartMatch}
+              disabled={!canStart}
+              className="w-full py-3 px-4 rounded-xl bg-lantern-400 hover:bg-lantern-300 disabled:opacity-40 disabled:cursor-not-allowed text-ink-950 font-bold text-sm transition-colors shadow-lg shadow-lantern-500/10 flex items-center justify-center gap-2"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              Começar a partida
+            </button>
+          ) : (
+            <div className="text-center p-2.5 rounded-xl bg-ink-950/60 border border-white/5 text-[11px] text-slate-500">
+              Aguardando o anfitrião iniciar…
+            </div>
+          )}
+          {players.length < config.minPlayers && (
+            <p className="text-[11px] text-lantern-300 text-center">
+              Faltam {config.minPlayers - players.length} moradores (ou complete com bots).
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 };
-

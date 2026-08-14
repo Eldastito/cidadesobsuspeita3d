@@ -1,25 +1,100 @@
 @import "tailwindcss";
 
+/*
+ * Identidade visual — "vila noir aconchegante"
+ * Tinta profunda + âmbar de lamparina. Tokens viram utilitárias do Tailwind v4.
+ */
+@theme {
+  --color-ink-950: #0b0d14;
+  --color-ink-900: #10131d;
+  --color-ink-800: #161a27;
+  --color-ink-700: #1f2434;
+
+  --color-lantern-200: #ffe3a3;
+  --color-lantern-300: #fac85a;
+  --color-lantern-400: #f5b942;
+  --color-lantern-500: #e8a62e;
+
+  --font-display: "Cinzel", "Georgia", serif;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
 @layer base {
   body {
-    background-color: #0A0B0E;
+    background-color: var(--color-ink-950);
     color: #cbd5e1;
+    font-family: var(--font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* Vinheta sutil para profundidade */
+    background-image: radial-gradient(ellipse at 50% -10%, #1a1f31 0%, var(--color-ink-950) 58%);
+    background-attachment: fixed;
   }
 }
 
-/* Custom scrollbar for high density terminal panels */
+/* Barra de rolagem discreta */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0A0B0E;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #262d40;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #364159;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Legenda do narrador */
+@keyframes caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.narrator-caption {
+  animation: caption-in 0.35s ease-out;
+}
+
+/* Faixa de fase */
+@keyframes banner-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.phase-banner {
+  animation: banner-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Timer de fase */
+.timer-bar {
+  transition: width 1s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narrator-caption,
+  .phase-banner {
+    animation: none;
+  }
+  .timer-bar {
+    transition: none;
+  }
 }

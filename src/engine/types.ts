@@ -1,6 +1,6 @@
 /**
- * Cidade Sob Suspeita 3D - Core Engine Types
- * Clean Architecture & Deterministic State Machine Entities
+ * Cidade Sob Suspeita 3D — Tipos do motor de regras
+ * Entidades puras, sem dependência de DOM, rede ou relógio global.
  */
 
 export enum Role {
@@ -35,8 +35,9 @@ export enum NightActionType {
   KILL = 'KILL', // Assassino
   HEAL = 'HEAL', // Médico
   INVESTIGATE = 'INVESTIGATE', // Detetive
-  WITCH_KILL = 'WITCH_KILL', // Bruxa poção de morte
-  WITCH_PROTECT_ALL = 'WITCH_PROTECT_ALL', // Bruxa poção de salvação coletiva
+  WITCH_KILL = 'WITCH_KILL', // Bruxa: poção de morte
+  WITCH_PROTECT_ALL = 'WITCH_PROTECT_ALL', // Bruxa: proteção coletiva
+  OBSERVE = 'OBSERVE', // Cidadão: registra uma suspeita privada (sem efeito mecânico)
   PASS = 'PASS', // Não agir
 }
 
@@ -44,6 +45,14 @@ export enum VictoryWinner {
   TOWN = 'CIDADE',
   ASSASSINS = 'ASSASSINOS',
   DRAW = 'EMPATE',
+}
+
+/** Resultado determinístico de uma rodada de votação. */
+export enum VotingOutcome {
+  ELIMINATED = 'ELIMINATED',
+  NO_ELIMINATION = 'NO_ELIMINATION',
+  TIE_MAYOR = 'TIE_MAYOR', // empate → Prefeito decide
+  TIE_RUNOFF = 'TIE_RUNOFF', // empate → segundo turno
 }
 
 export interface PlayerWitchCharges {
@@ -55,8 +64,16 @@ export interface DetectiveEntry {
   round: number;
   targetId: string;
   targetNickname: string;
-  isSuspicious: boolean; // "suspeito" (Assassino) vs "não suspeito" (outros)
+  isSuspicious: boolean; // "suspeito" (Assassino) vs "não suspeito" (demais)
 }
+
+export interface HunchEntry {
+  round: number;
+  targetId: string;
+  targetNickname: string;
+}
+
+export type DeathReason = 'ASSASSIN_ATTACK' | 'WITCH_POTION' | 'VOTED_OUT' | 'DISCONNECTED';
 
 export interface Player {
   id: string;
@@ -67,27 +84,28 @@ export interface Player {
   isBot: boolean;
   isReady: boolean;
   isConnected: boolean;
-  seatNumber: number; // 0 to 15
-  
-  // Game runtime state
+  seatNumber: number; // 0 a 15
+
+  // Estado de partida
   isAlive: boolean;
   role: Role;
   hasConfirmedRole: boolean;
   isMayor: boolean;
-  
-  // Role-specific runtime state
+
+  // Estado específico por papel
   witchCharges: PlayerWitchCharges;
   doctorSelfHealUsed: boolean;
   lastDoctorTargetId: string | null;
   investigationLog: DetectiveEntry[];
-  
-  // Voting & Day state
+  hunchLog: HunchEntry[];
+
+  // Dia e votação
   votedTargetId: string | null;
   hasRaisedHand: boolean;
-  
-  // Death audit
+
+  // Auditoria de morte
   deathRound?: number;
-  deathReason?: 'ASSASSIN_ATTACK' | 'WITCH_POTION' | 'VOTED_OUT' | 'DISCONNECTED';
+  deathReason?: DeathReason;
 }
 
 export interface RoomConfig {
@@ -104,9 +122,17 @@ export interface RoomConfig {
   discussionDurationSeconds: number;
   votingDurationSeconds: number;
   revealRoleOnDeath: boolean;
-  sequentialVoting: boolean;
   enableMayorTiebreak: boolean;
 }
+
+/** Durações fixas de fases curtas (segundos). */
+export const PHASE_DURATIONS = {
+  roleReveal: 15,
+  dawn: 8,
+  runoff: 25,
+  mayorTiebreak: 20,
+  dayResolution: 6,
+} as const;
 
 export interface NightSubmission {
   playerId: string;
@@ -118,7 +144,7 @@ export interface NightSubmission {
 
 export interface VoteSubmission {
   voterId: string;
-  targetId: string | null; // null for abstention/skip
+  targetId: string | null; // null = abstenção
   clientActionId: string;
   timestamp: number;
 }
@@ -136,12 +162,13 @@ export interface DawnSummary {
 
 export interface VotingSummary {
   round: number;
+  outcome: VotingOutcome;
+  wasRunoff: boolean;
   eliminatedPlayerId: string | null;
   eliminatedNickname: string | null;
   revealedRole?: Role;
-  votes: Record<string, string | null>; // voterId -> targetId
-  voteCounts: Record<string, number>; // targetId -> count
-  wasTie: boolean;
+  votes: Record<string, string | null>; // eleitor → alvo
+  voteCounts: Record<string, number>; // alvo → contagem
   tiePlayerIds?: string[];
   mayorDecided?: boolean;
 }
@@ -151,11 +178,20 @@ export interface TimelineEvent {
   round: number;
   phase: GamePhase;
   timestamp: number;
-  type: 'MATCH_START' | 'NIGHT_START' | 'DAWN_ANNOUNCEMENT' | 'DISCUSSION_START' | 'VOTING_START' | 'ELIMINATION' | 'MATCH_END';
+  type:
+    | 'MATCH_START'
+    | 'NIGHT_START'
+    | 'DAWN_ANNOUNCEMENT'
+    | 'DISCUSSION_START'
+    | 'VOTING_START'
+    | 'RUNOFF_START'
+    | 'MAYOR_TIEBREAK'
+    | 'ELIMINATION'
+    | 'MATCH_END';
   title: string;
   description: string;
   publicPayload?: any;
-  secretPayload?: any; // Only revealed at match end
+  secretPayload?: any; // revelado apenas ao final da partida
 }
 
 export interface ChatMessage {
@@ -169,9 +205,7 @@ export interface ChatMessage {
   isSystem?: boolean;
 }
 
-/**
- * Public/Stripped Player View visible to clients during gameplay
- */
+/** Visão pública de um jogador — o que qualquer cliente pode saber. */
 export interface PublicPlayerView {
   id: string;
   nickname: string;
@@ -184,14 +218,15 @@ export interface PublicPlayerView {
   isAlive: boolean;
   isMayor: boolean;
   hasRaisedHand: boolean;
-  // If match finished OR config.revealRoleOnDeath & player is dead
+  /** Preenchido só quando a partida termina ou a sala revela papel de mortos. */
   revealedRole?: Role;
-  // During open voting / post-voting
+  /** Visível apenas na resolução do dia / fim de partida. */
   votedTargetId?: string | null;
 }
 
 /**
- * Private Player Snapshot sent securely over WebSocket to this specific player
+ * Snapshot privado enviado a um único jogador.
+ * Nunca contém papéis ou ações secretas de terceiros.
  */
 export interface PrivatePlayerSnapshot {
   player: {
@@ -208,11 +243,12 @@ export interface PrivatePlayerSnapshot {
     doctorSelfHealUsed?: boolean;
     lastDoctorTargetId?: string | null;
     investigationLog?: DetectiveEntry[];
-    // Fellow assassins if current player is assassin
+    hunchLog?: HunchEntry[];
+    /** Comparsas, apenas se o jogador for Assassino. */
     fellowAssassinIds?: string[];
-    // Pending submission
     currentNightAction?: NightSubmission | null;
     currentVote?: string | null;
+    hasVoted?: boolean;
   };
   room: {
     roomId: string;
@@ -220,13 +256,16 @@ export interface PrivatePlayerSnapshot {
     phase: GamePhase;
     roundNumber: number;
     phaseTimeRemaining: number;
+    phaseDuration: number;
     config: RoomConfig;
     players: PublicPlayerView[];
     aliveCount: number;
     winner: VictoryWinner | null;
     dawnSummary: DawnSummary | null;
     lastVotingSummary: VotingSummary | null;
+    /** Candidatos do desempate, público durante RUNOFF/MAYOR_TIEBREAK. */
+    tieCandidateIds: string[];
     timeline: TimelineEvent[];
-    allRolesRevealed?: Record<string, Role>; // Provided only when phase is FINISHED
+    allRolesRevealed?: Record<string, Role>; // apenas em FINISHED
   };
 }
