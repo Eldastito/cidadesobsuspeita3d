@@ -52,6 +52,15 @@ export const ROLE_METADATA: Record<
     color: '#a855f7',
     emoji: '🧪',
   },
+  [Role.GUARDA]: {
+    name: 'Guarda-costas',
+    alignment: RoleAlignment.TOWN,
+    description: 'Escudo silencioso da cidade, disposto ao sacrifício final.',
+    abilityDescription:
+      'Escolhe alguém para escoltar a cada noite. Se os assassinos atacarem essa pessoa, o Guarda-costas morre no lugar dela. Não pode escoltar a si mesmo.',
+    color: '#0ea5e9',
+    emoji: '🛡️',
+  },
   [Role.CIDADAO]: {
     name: 'Cidadão',
     alignment: RoleAlignment.TOWN,
@@ -71,6 +80,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
     doctor: 1,
     detective: 1,
     witch: 1,
+    bodyguard: 0,
     mayor: 1,
   },
   nightDurationSeconds: 30,
@@ -79,18 +89,57 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   votingMode: VotingMode.SECRET,
   revealRoleOnDeath: false,
   enableMayorTiebreak: true,
+  roleInheritance: false,
 };
+
+/** Presets de sala (editor de regras da Fase 5). */
+export const ROOM_PRESETS: Array<{
+  id: string;
+  name: string;
+  description: string;
+  apply: (playerCount: number) => Partial<RoomConfig>;
+}> = [
+  {
+    id: 'classica',
+    name: 'Clássica',
+    description: 'A composição recomendada para o número de jogadores, sem expansões.',
+    apply: playerCount => ({
+      rolesCount: { ...getRecommendedRoles(playerCount), bodyguard: 0 },
+      roleInheritance: false,
+      votingMode: VotingMode.SECRET,
+    }),
+  },
+  {
+    id: 'completa',
+    name: 'Completa',
+    description: 'Todos os papéis em jogo, incluindo o Guarda-costas.',
+    apply: playerCount => ({
+      rolesCount: { ...getRecommendedRoles(Math.max(playerCount, 7)), bodyguard: 1 },
+      roleInheritance: false,
+    }),
+  },
+  {
+    id: 'heranca',
+    name: 'Caos com Herança',
+    description: 'Papéis não morrem com seus donos: um Cidadão sorteado herda cada poder perdido.',
+    apply: playerCount => ({
+      rolesCount: { ...getRecommendedRoles(Math.max(playerCount, 7)), bodyguard: 1 },
+      roleInheritance: true,
+      votingMode: VotingMode.SEQUENTIAL,
+    }),
+  },
+];
 
 /** Composição recomendada por quantidade de jogadores (PRD 3.1). */
 export function getRecommendedRoles(playerCount: number): RoomConfig['rolesCount'] {
   if (playerCount <= 6) {
-    return { assassins: 1, doctor: 1, detective: 1, witch: 0, mayor: 0 };
+    return { assassins: 1, doctor: 1, detective: 1, witch: 0, bodyguard: 0, mayor: 0 };
   } else if (playerCount <= 9) {
-    return { assassins: 1, doctor: 1, detective: 1, witch: 1, mayor: 0 };
+    return { assassins: 1, doctor: 1, detective: 1, witch: 1, bodyguard: 0, mayor: 0 };
   } else if (playerCount <= 12) {
-    return { assassins: 2, doctor: 1, detective: 1, witch: 1, mayor: 1 };
+    return { assassins: 2, doctor: 1, detective: 1, witch: 1, bodyguard: 0, mayor: 1 };
   }
-  return { assassins: 3, doctor: 1, detective: 1, witch: 1, mayor: 1 };
+  return { assassins: 3, doctor: 1, detective: 1, witch: 1, bodyguard: 0, mayor: 1 };
 }
 
 /** Valida se a composição é jogável (a cidade precisa começar em maioria). */
@@ -98,7 +147,7 @@ export function validateComposition(
   playerCount: number,
   roles: RoomConfig['rolesCount']
 ): { valid: boolean; reason?: string } {
-  const specials = roles.assassins + roles.doctor + roles.detective + roles.witch;
+  const specials = roles.assassins + roles.doctor + roles.detective + roles.witch + (roles.bodyguard || 0);
   if (roles.assassins < 1) {
     return { valid: false, reason: 'A partida precisa de pelo menos 1 assassino.' };
   }
@@ -112,13 +161,14 @@ export function validateComposition(
 }
 
 export function generateRoleDeck(playerCount: number, config: RoomConfig): Role[] {
-  const { assassins, doctor, detective, witch } = config.rolesCount;
+  const { assassins, doctor, detective, witch, bodyguard } = config.rolesCount;
 
   const deck: Role[] = [];
   for (let i = 0; i < assassins; i++) deck.push(Role.ASSASSINO);
   for (let i = 0; i < doctor; i++) deck.push(Role.MEDICO);
   for (let i = 0; i < detective; i++) deck.push(Role.DETETIVE);
   for (let i = 0; i < witch; i++) deck.push(Role.BRUXA);
+  for (let i = 0; i < (bodyguard || 0); i++) deck.push(Role.GUARDA);
   while (deck.length < playerCount) deck.push(Role.CIDADAO);
 
   return deck.slice(0, playerCount);

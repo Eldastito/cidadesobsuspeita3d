@@ -23,6 +23,27 @@ import { sound } from './soundEffects.ts';
 
 const STORAGE_KEY = 'cidade-sob-suspeita:session';
 const GUEST_KEY = 'cidade-sob-suspeita:guest-id';
+const COLOR_KEY = 'cidade-sob-suspeita:avatar-color';
+
+/** Cor cosmética escolhida no lobby (persistente por navegador). */
+export function getStoredAvatarColor(): number | undefined {
+  try {
+    const raw = localStorage.getItem(COLOR_KEY);
+    if (raw === null) return undefined;
+    const n = Number(raw);
+    return Number.isInteger(n) ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setStoredAvatarColor(index: number): void {
+  try {
+    localStorage.setItem(COLOR_KEY, String(index));
+  } catch {
+    // sem armazenamento, sem persistência — a cor vale só nesta sessão
+  }
+}
 
 /** Identidade persistente do navegador — dá continuidade às estatísticas. */
 function getGuestId(): string {
@@ -361,12 +382,30 @@ export function useGameClient() {
 
   const createRoom = (nickname: string, avatarId: string, config?: Partial<RoomConfig>) => {
     pendingIdentityRef.current = { nickname, avatarId };
-    send({ type: 'room.create', payload: { nickname, avatarId, config, guestId: getGuestId() } });
+    send({
+      type: 'room.create',
+      payload: {
+        nickname,
+        avatarId,
+        avatarColor: getStoredAvatarColor(),
+        config,
+        guestId: getGuestId(),
+      },
+    });
   };
 
   const joinRoom = (roomCode: string, nickname: string, avatarId: string) => {
     pendingIdentityRef.current = { nickname, avatarId };
-    send({ type: 'room.join', payload: { roomCode, nickname, avatarId, guestId: getGuestId() } });
+    send({
+      type: 'room.join',
+      payload: {
+        roomCode,
+        nickname,
+        avatarId,
+        avatarColor: getStoredAvatarColor(),
+        guestId: getGuestId(),
+      },
+    });
   };
 
   const leaveRoom = () => send({ type: 'room.leave' });

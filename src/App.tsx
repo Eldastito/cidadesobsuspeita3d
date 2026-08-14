@@ -250,6 +250,23 @@ export default function App() {
         />
       )}
 
+      {/* Modo herança: aviso secreto de papel herdado no meio da partida */}
+      {!isRoleReveal &&
+        !isLobby &&
+        !isFinished &&
+        snapshot &&
+        snapshot.player.isAlive &&
+        snapshot.player.inheritedRoleRound !== undefined &&
+        !snapshot.player.hasConfirmedRole && (
+          <RoleRevealModal
+            role={snapshot.player.role}
+            isMayor={snapshot.player.isMayor}
+            hasConfirmed={false}
+            onConfirm={confirmRole}
+            isInheritance
+          />
+        )}
+
       {/* Caderno do detetive */}
       {snapshot?.player.role === 'DETETIVE' && (
         <DetectiveNotebook

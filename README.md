@@ -80,6 +80,14 @@ Durante a **noite**, todos os avatares voltam a seus assentos e dormem — o mov
 
 Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, **voz WebRTC** com canal dos vivos e cemitério isolado (malha P2P, ver [ADR 001](docs/adr/001-voz-webrtc-malha.md)), chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
 
+### Expansões (Fase 5)
+
+- **Guarda-costas 🛡️** (papel opcional): escolta alguém à noite e morre no lugar da vítima se ela for atacada.
+- **Herança de papel** (modo personalizado, desligado por padrão): quando um poder da cidade morre, um Cidadão sorteado o herda em segredo — com aviso público genérico e revelação só no pós-jogo.
+- **Presets de sala**: Clássica, Completa e Caos com Herança, com validador de equilíbrio.
+- **Cor do traje**: cosmético escolhido pelo jogador, persistente por navegador, sem vantagem competitiva.
+- **PWA opcional**: instalável no celular (manifest + service worker mínimo); jogar continua funcionando 100% pelo navegador.
+
 ### Persistência (Fase 4)
 
 - **Reiniciar o servidor não mata as partidas**: as salas são gravadas em SQLite embutido (`data/cidade.db`, via `node:sqlite` — zero dependências) e restauradas no boot; os jogadores reconectam sozinhos e a partida continua ([ADR 002](docs/adr/002-persistencia-sqlite.md)).

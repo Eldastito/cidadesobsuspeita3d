@@ -38,6 +38,8 @@ export type ClientMessage =
       payload: {
         nickname: string;
         avatarId: string;
+        /** Cor cosmética do morador (índice da paleta). */
+        avatarColor?: number;
         config?: Partial<RoomConfig>;
         /** Identidade persistente do navegador (estatísticas). */
         guestId?: string;
@@ -49,6 +51,7 @@ export type ClientMessage =
         roomCode: string;
         nickname: string;
         avatarId: string;
+        avatarColor?: number;
         /** Presente ao retomar sessão após queda de conexão. */
         sessionId?: string;
         guestId?: string;

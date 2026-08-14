@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Check, Eye, Heart, Moon, Search, Skull, Sparkles } from 'lucide-react';
+import { Check, Eye, Heart, Moon, Search, Shield, Skull, Sparkles } from 'lucide-react';
 import { NightActionType, PrivatePlayerSnapshot, Role } from '../../engine/types.ts';
 import { ROLE_METADATA } from '../../engine/rules.ts';
 
@@ -230,6 +230,41 @@ export const NightActionPanel: React.FC<NightActionPanelProps> = ({
         </div>
         <p className="text-[10px] text-slate-500">
           O resultado chega ao seu caderno quando o dia amanhecer.
+        </p>
+      </Panel>
+    );
+  }
+
+  // ── Guarda-costas (expansão) ─────────────────────────────────────────────
+  if (player.role === Role.GUARDA) {
+    const meta = ROLE_METADATA[Role.GUARDA];
+    const isTargetValid = selectedTarget && selectedTarget.isAlive && selectedTarget.id !== player.id;
+    return (
+      <Panel
+        accent={meta.color}
+        icon={<Shield className="w-4 h-4" />}
+        kicker="Ronda de escolta"
+        title="Quem você protege com a própria vida?"
+        right={hasSubmitted ? <SubmittedBadge label="Escolta a postos" /> : undefined}
+      >
+        <div className="p-2.5 bg-ink-950/70 border border-white/10 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-500 text-[10px] uppercase">Escoltar:</span>
+            <span className="font-bold text-white">{targetLabel('toque em alguém na praça')}</span>
+            {selectedTarget?.id === player.id && (
+              <span className="text-[10px] text-rose-400">(você não pode se escoltar)</span>
+            )}
+          </div>
+          <button
+            onClick={() => onSubmitAction(NightActionType.BODYGUARD, selectedTargetId)}
+            disabled={!isTargetValid}
+            className="w-full sm:w-auto px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-30 text-white font-bold text-xs transition-colors"
+          >
+            Confirmar escolta
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-500">
+          Se os assassinos atacarem quem você escolta, você cai no lugar da vítima.
         </p>
       </Panel>
     );

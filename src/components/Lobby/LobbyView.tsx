@@ -20,8 +20,16 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { GamePhase, PrivatePlayerSnapshot, Role, RoomConfig, VotingMode } from '../../engine/types.ts';
-import { getRecommendedRoles, ROLE_METADATA, validateComposition } from '../../engine/rules.ts';
-import { MovementBus, ProfileData } from '../../services/gameClient.ts';
+import { getRecommendedRoles, ROLE_METADATA, ROOM_PRESETS, validateComposition } from '../../engine/rules.ts';
+import {
+  getStoredAvatarColor,
+  MovementBus,
+  ProfileData,
+  setStoredAvatarColor,
+} from '../../services/gameClient.ts';
+import { AVATAR_COLORS } from '../../three/sceneAssets.ts';
+
+const colorHex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 import { TownSquare3D } from '../3D/TownSquare3D.tsx';
 import { TownSquare2D } from '../2D/TownSquare2D.tsx';
 
@@ -83,8 +91,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     () => NICKNAME_SUGGESTIONS[Math.floor(Math.random() * NICKNAME_SUGGESTIONS.length)]
   );
   const [selectedAvatar, setSelectedAvatar] = useState('avatar-1');
+  const [selectedColor, setSelectedColor] = useState<number>(() => getStoredAvatarColor() ?? 0);
   const [joinCode, setJoinCode] = useState('');
   const [copied, setCopied] = useState(false);
+
+  const pickColor = (index: number) => {
+    setSelectedColor(index);
+    setStoredAvatarColor(index);
+  };
 
   // ── Tela de chegada ──────────────────────────────────────────────────────
   if (!snapshot) {
@@ -146,6 +160,30 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   >
                     {av.emoji}
                   </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Cor do traje (cosmético, sem vantagem) */}
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-1.5">
+                Cor do seu traje
+              </span>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cor do traje">
+                {AVATAR_COLORS.map((c, i) => (
+                  <button
+                    key={i}
+                    role="radio"
+                    aria-checked={selectedColor === i}
+                    aria-label={`Cor ${i + 1}`}
+                    onClick={() => pickColor(i)}
+                    className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                      selectedColor === i
+                        ? 'border-lantern-300 scale-110 shadow-lg'
+                        : 'border-white/15 hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: colorHex(c) }}
+                  />
                 ))}
               </div>
             </div>
@@ -337,7 +375,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       (config.rolesCount.assassins +
         config.rolesCount.doctor +
         config.rolesCount.detective +
-        config.rolesCount.witch)
+        config.rolesCount.witch +
+        (config.rolesCount.bodyguard || 0))
   );
   const recommended = getRecommendedRoles(players.length);
 
@@ -494,11 +533,33 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </button>
             )}
           </div>
+          {/* Presets do editor de regras (Fase 5) */}
+          {isHost && (
+            <div className="px-2.5 pt-2.5 flex flex-wrap gap-1.5">
+              {ROOM_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  onClick={() => onUpdateConfig(preset.apply(players.length))}
+                  title={preset.description}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-lantern-400/15 border border-white/10 hover:border-lantern-400/40 text-[10px] font-bold text-slate-300 hover:text-lantern-200 transition-colors"
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="p-2.5 space-y-1.5">
             {roleRow(Role.ASSASSINO, 'assassins', 3, 1)}
             {roleRow(Role.MEDICO, 'doctor', 1)}
             {roleRow(Role.DETETIVE, 'detective', 1)}
             {roleRow(Role.BRUXA, 'witch', 1)}
+            <div className="relative">
+              {roleRow(Role.GUARDA, 'bodyguard', 1)}
+              <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-sky-500/90 text-white text-[8px] font-bold uppercase tracking-wider pointer-events-none">
+                novo
+              </span>
+            </div>
             <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
                 <span aria-hidden>🏠</span> Cidadãos
@@ -525,6 +586,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   })
                 }
                 className="accent-amber-400 w-4 h-4"
+              />
+            </label>
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">
+                Herança de papel{' '}
+                <span className="px-1 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[8px] font-bold uppercase">novo</span>
+                <span className="block text-[10px] text-slate-500">
+                  Cidadão sorteado herda o poder de quem morre
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={config.roleInheritance}
+                disabled={!isHost}
+                onChange={e => onUpdateConfig({ roleInheritance: e.target.checked })}
+                className="accent-sky-400 w-4 h-4"
               />
             </label>
             <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">

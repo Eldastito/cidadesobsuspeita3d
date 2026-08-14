@@ -8,6 +8,8 @@ export enum Role {
   MEDICO = 'MEDICO',
   DETETIVE = 'DETETIVE',
   BRUXA = 'BRUXA',
+  /** Expansão (Fase 5): protege alguém e morre no lugar da vítima. */
+  GUARDA = 'GUARDA',
   CIDADAO = 'CIDADAO',
 }
 
@@ -37,6 +39,7 @@ export enum NightActionType {
   INVESTIGATE = 'INVESTIGATE', // Detetive
   WITCH_KILL = 'WITCH_KILL', // Bruxa: poção de morte
   WITCH_PROTECT_ALL = 'WITCH_PROTECT_ALL', // Bruxa: proteção coletiva
+  BODYGUARD = 'BODYGUARD', // Guarda-costas: intercepta o ataque
   OBSERVE = 'OBSERVE', // Cidadão: registra uma suspeita privada (sem efeito mecânico)
   PASS = 'PASS', // Não agir
 }
@@ -73,7 +76,12 @@ export interface HunchEntry {
   targetNickname: string;
 }
 
-export type DeathReason = 'ASSASSIN_ATTACK' | 'WITCH_POTION' | 'VOTED_OUT' | 'DISCONNECTED';
+export type DeathReason =
+  | 'ASSASSIN_ATTACK'
+  | 'WITCH_POTION'
+  | 'VOTED_OUT'
+  | 'BODYGUARD_SACRIFICE'
+  | 'DISCONNECTED';
 
 export interface Player {
   id: string;
@@ -82,6 +90,8 @@ export interface Player {
   guestId?: string;
   nickname: string;
   avatarId: string;
+  /** Cor cosmética escolhida pelo jogador (índice da paleta; sem vantagem). */
+  avatarColor?: number;
   isHost: boolean;
   isBot: boolean;
   isReady: boolean;
@@ -108,6 +118,9 @@ export interface Player {
   // Auditoria de morte
   deathRound?: number;
   deathReason?: DeathReason;
+
+  /** Rodada em que herdou o papel atual (modo herança). */
+  inheritedRoleRound?: number;
 }
 
 /** Modo de votação diurna (PRD 6.7). */
@@ -126,6 +139,8 @@ export interface RoomConfig {
     doctor: number;
     detective: number;
     witch: number;
+    /** Expansão: Guarda-costas (0 = desligado). */
+    bodyguard: number;
     mayor: number;
   };
   nightDurationSeconds: number;
@@ -134,6 +149,11 @@ export interface RoomConfig {
   votingMode: VotingMode;
   revealRoleOnDeath: boolean;
   enableMayorTiebreak: boolean;
+  /**
+   * Modo herança (Fase 5, desligado por padrão): quando um papel especial
+   * da cidade morre, um Cidadão vivo sorteado o herda em segredo.
+   */
+  roleInheritance: boolean;
 }
 
 /** Durações fixas de fases curtas (segundos). */
@@ -200,6 +220,7 @@ export interface TimelineEvent {
     | 'RUNOFF_START'
     | 'MAYOR_TIEBREAK'
     | 'ELIMINATION'
+    | 'ROLE_INHERITED'
     | 'MATCH_END';
   title: string;
   description: string;
@@ -223,6 +244,7 @@ export interface PublicPlayerView {
   id: string;
   nickname: string;
   avatarId: string;
+  avatarColor?: number;
   isHost: boolean;
   isBot: boolean;
   isReady: boolean;
@@ -252,6 +274,8 @@ export interface PrivatePlayerSnapshot {
     isMayor: boolean;
     role: Role;
     hasConfirmedRole: boolean;
+    /** Rodada em que herdou o papel (modo herança) — exibe o aviso secreto. */
+    inheritedRoleRound?: number;
     witchCharges?: PlayerWitchCharges;
     doctorSelfHealUsed?: boolean;
     lastDoctorTargetId?: string | null;

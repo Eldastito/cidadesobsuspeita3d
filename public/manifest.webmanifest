@@ -1,0 +1,19 @@
+{
+  "name": "Cidade Sob Suspeita 3D",
+  "short_name": "Cidade Sob Suspeita",
+  "description": "Jogo social de dedução, sobrevivência e votação em uma vila 3D no navegador.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0D14",
+  "theme_color": "#0B0D14",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

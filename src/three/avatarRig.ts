@@ -82,14 +82,20 @@ export class AvatarRig {
     seatPos: { x: number; z: number; ry: number };
   } | null = null;
 
-  constructor(playerId: string, avatarId: string, seatNumber: number, initial: AvatarVisualState) {
+  constructor(
+    playerId: string,
+    avatarId: string,
+    seatNumber: number,
+    initial: AvatarVisualState,
+    avatarColorIndex?: number
+  ) {
     this.playerId = playerId;
     this.state = { ...initial };
 
     this.group = new THREE.Group();
     this.group.userData = { playerId };
 
-    const color = avatarColorFor(seatNumber);
+    const color = avatarColorFor(avatarColorIndex ?? seatNumber);
     const skin = skinToneFor(seatNumber);
     const bodyMat = bodyMaterial(color);
     const skinMat = skinMaterial(skin);

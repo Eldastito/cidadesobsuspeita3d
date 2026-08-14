@@ -65,12 +65,19 @@ function night(engine: GameEngine, playerId: string, actionType: NightActionType
 
 describe('composição e sorteio', () => {
   it('rejeita composição com assassinos em maioria', () => {
-    expect(validateComposition(6, { assassins: 3, doctor: 1, detective: 1, witch: 0, mayor: 0 }).valid).toBe(false);
-    expect(validateComposition(7, { assassins: 3, doctor: 1, detective: 1, witch: 0, mayor: 0 }).valid).toBe(true);
+    expect(
+      validateComposition(6, { assassins: 3, doctor: 1, detective: 1, witch: 0, bodyguard: 0, mayor: 0 }).valid
+    ).toBe(false);
+    expect(
+      validateComposition(7, { assassins: 3, doctor: 1, detective: 1, witch: 0, bodyguard: 0, mayor: 0 }).valid
+    ).toBe(true);
   });
 
   it('distribui exatamente os papéis configurados', () => {
-    const engine = makeEngine({ minPlayers: 6, rolesCount: { assassins: 1, doctor: 1, detective: 1, witch: 1, mayor: 1 } });
+    const engine = makeEngine({
+      minPlayers: 6,
+      rolesCount: { assassins: 1, doctor: 1, detective: 1, witch: 1, bodyguard: 0, mayor: 1 },
+    });
     for (let i = 0; i < 8; i++) {
       const p = engine.addPlayer(`p${i}`, `s${i}`, `J${i}`, 'avatar-1', i === 0);
       p.isReady = true;
@@ -506,6 +513,164 @@ describe('sigilo dos snapshots (PRD 9.3)', () => {
     const finalSnap = engine.getPrivateSnapshot('p1')!;
     expect(finalSnap.room.allRolesRevealed).toBeDefined();
     expect(finalSnap.room.allRolesRevealed!['p0']).toBe(Role.ASSASSINO);
+  });
+});
+
+describe('Guarda-costas (expansão da Fase 5)', () => {
+  it('morre no lugar da vítima escoltada', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.GUARDA, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    night(engine, 'p0', NightActionType.KILL, 'p2');
+    night(engine, 'p1', NightActionType.BODYGUARD, 'p2');
+
+    const dawn = engine.resolveNight();
+    expect(dawn.killedPlayerIds).toEqual(['p1']);
+    expect(engine.players.get('p1')!.deathReason).toBe('BODYGUARD_SACRIFICE');
+    expect(engine.players.get('p2')!.isAlive).toBe(true);
+  });
+
+  it('não intercepta quando o médico já bloqueou o ataque', () => {
+    const engine = makeFixedMatch([
+      Role.ASSASSINO,
+      Role.GUARDA,
+      Role.MEDICO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    night(engine, 'p0', NightActionType.KILL, 'p3');
+    night(engine, 'p2', NightActionType.HEAL, 'p3');
+    night(engine, 'p1', NightActionType.BODYGUARD, 'p3');
+
+    const dawn = engine.resolveNight();
+    expect(dawn.killedPlayerIds).toHaveLength(0);
+    expect(engine.players.get('p1')!.isAlive).toBe(true);
+  });
+
+  it('não escolta a si mesmo e morre normalmente se for o alvo direto', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.GUARDA, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    expect(night(engine, 'p1', NightActionType.BODYGUARD, 'p1').accepted).toBe(false);
+
+    night(engine, 'p1', NightActionType.BODYGUARD, 'p2');
+    night(engine, 'p0', NightActionType.KILL, 'p1'); // atacam o próprio guarda
+    const dawn = engine.resolveNight();
+    expect(dawn.killedPlayerIds).toEqual(['p1']);
+    expect(engine.players.get('p1')!.deathReason).toBe('ASSASSIN_ATTACK');
+  });
+});
+
+describe('herança de papel (modo personalizado da Fase 5)', () => {
+  function makeInheritanceMatch(roles: Role[]) {
+    return makeFixedMatch(roles, { config: { roleInheritance: true } });
+  }
+
+  it('cidadão sorteado herda o papel do médico morto e age na noite seguinte', () => {
+    const engine = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.MEDICO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    night(engine, 'p0', NightActionType.KILL, 'p1'); // mata o médico
+    engine.resolveNight();
+
+    expect(engine.players.get('p1')!.isAlive).toBe(false);
+    const heirs = ['p2', 'p3', 'p4'].filter(id => engine.players.get(id)!.role === Role.MEDICO);
+    expect(heirs).toHaveLength(1);
+    const heir = engine.players.get(heirs[0])!;
+    expect(heir.inheritedRoleRound).toBe(1);
+    expect(heir.hasConfirmedRole).toBe(false); // humano verá o aviso secreto
+
+    // O herdeiro pode agir como médico na noite seguinte
+    engine.roundNumber = 2;
+    engine.startNight();
+    expect(night(engine, heir.id, NightActionType.HEAL, 'p0').accepted).toBe(true);
+  });
+
+  it('cargas restantes da bruxa acompanham a herança', () => {
+    const engine = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.BRUXA,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    // Bruxa gasta a poção de morte antes de morrer
+    night(engine, 'p1', NightActionType.WITCH_KILL, 'p4');
+    night(engine, 'p0', NightActionType.KILL, 'p1');
+    engine.resolveNight();
+
+    const heir = ['p2', 'p3'].map(id => engine.players.get(id)!).find(p => p.role === Role.BRUXA);
+    expect(heir).toBeDefined();
+    expect(heir!.witchCharges.hasKillPotion).toBe(false); // já consumida pela antecessora
+    expect(heir!.witchCharges.hasProtectAllPotion).toBe(true);
+  });
+
+  it('herança também acontece no julgamento diurno', () => {
+    const engine = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.DETETIVE,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    engine.phase = GamePhase.VOTING;
+    engine.submitVote('p0', 'p1');
+    engine.submitVote('p2', 'p1');
+    engine.submitVote('p3', 'p1');
+    engine.resolveVoting();
+
+    expect(engine.players.get('p1')!.isAlive).toBe(false);
+    const heir = ['p2', 'p3', 'p4'].map(id => engine.players.get(id)!).find(p => p.role === Role.DETETIVE);
+    expect(heir).toBeDefined();
+    expect(heir!.investigationLog).toHaveLength(0); // caderno começa vazio
+  });
+
+  it('assassino nunca é herdado e o modo desligado não transfere nada', () => {
+    // Assassino morto com herança ligada → ninguém vira assassino
+    const engine = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.ASSASSINO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    engine.phase = GamePhase.VOTING;
+    engine.submitVote('p2', 'p0');
+    engine.submitVote('p3', 'p0');
+    engine.submitVote('p4', 'p0');
+    engine.resolveVoting();
+    const assassins = Array.from(engine.players.values()).filter(
+      p => p.isAlive && p.role === Role.ASSASSINO
+    );
+    expect(assassins.map(a => a.id)).toEqual(['p1']);
+
+    // Modo desligado: médico morre e ninguém herda
+    const engine2 = makeFixedMatch([Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    night(engine2, 'p0', NightActionType.KILL, 'p1');
+    engine2.resolveNight();
+    const doctors = Array.from(engine2.players.values()).filter(p => p.role === Role.MEDICO);
+    expect(doctors).toHaveLength(1); // só o morto
+    expect(doctors[0].isAlive).toBe(false);
+  });
+
+  it('o aviso público de herança não vaza papel nem herdeiro antes do fim', () => {
+    const engine = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.MEDICO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    night(engine, 'p0', NightActionType.KILL, 'p1');
+    engine.resolveNight();
+
+    const snap = engine.getPrivateSnapshot('p0')!; // visão do assassino
+    const inheritEvt = snap.room.timeline.find(t => t.type === 'ROLE_INHERITED')!;
+    expect(inheritEvt).toBeDefined();
+    expect(inheritEvt.secretPayload).toBeUndefined();
+    expect(inheritEvt.description).not.toContain('Médico');
+    expect(JSON.stringify(snap.room.players)).not.toContain('MEDICO');
   });
 });
 
