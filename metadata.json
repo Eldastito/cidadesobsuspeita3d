@@ -1,0 +1,6 @@
+{
+  "name": "Cidade Sob Suspeita 3D",
+  "description": "Jogo social de dedução, sobrevivência e votação multiplayer em 3D no navegador.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
