@@ -35,7 +35,7 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 | Médico | 1 autoproteção por partida; **não pode repetir o alvo da noite anterior** |
 | Bruxa | exatamente **1 poção de morte + 1 proteção coletiva** por partida |
 | Prefeito | **papel público** sorteado entre não-assassinos; desempata votações |
-| Votação padrão | **secreta e simultânea**; resultado só na apuração |
+| Votação padrão | **secreta e simultânea**; resultado só na apuração. Modo opcional **aberto em sequência** (como no vídeo): voto declarado em voz alta, público e definitivo, na ordem dos assentos, com janela de 15 s por votante (silêncio = abstenção) |
 | Comunicação | texto (voz fica para fase futura) |
 | Sala | 5 a 12 jogadores |
 | Herança de papel | **não existe** — papel de morto não é transferido |
@@ -92,8 +92,11 @@ substitui a anterior (idempotência) — nunca duplica efeito.
 1. **Amanhecer:** o narrador anuncia mortes (nunca causas ou autores).
 2. **Debate:** cronômetro configurável (60–300 s); vivos conversam; mortos apenas no
    canal isolado do cemitério.
-3. **Votação:** secreta e simultânea; um voto por jogador vivo; pode mudar até o fim;
-   ausência = abstenção. Resultado revelado só na apuração.
+3. **Votação:** um voto por jogador vivo; ausência = abstenção.
+   - *Modo secreto (padrão):* simultânea; pode mudar o voto até o fim; resultado só na apuração.
+   - *Modo aberto em sequência:* cada votante declara na ordem dos assentos, com 15 s de
+     janela; o voto é público e definitivo assim que declarado (o avatar aponta o acusado
+     na praça). Estourar o tempo conta como abstenção pública.
 4. **Empate:**
    - com Prefeito vivo e habilitado → **voto de minerva** (apenas entre empatados);
    - Prefeito omisso/morto/ausente → **segundo turno** restrito aos empatados;

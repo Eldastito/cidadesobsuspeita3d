@@ -15,6 +15,35 @@ interface RoleRevealModalProps {
   onConfirm: () => void;
 }
 
+/** Tutorial curto e específico por papel (PRD 6.3). */
+const TUTORIAL_STEPS: Record<Role, string[]> = {
+  [Role.ASSASSINO]: [
+    'À noite, toque em alguém na praça e confirme o ataque — a maioria dos assassinos define a vítima.',
+    'De dia, finja inocência: debata, acuse os outros e nunca proteja demais um comparsa.',
+    'Vocês vencem quando os assassinos igualarem o número de moradores vivos.',
+  ],
+  [Role.MEDICO]: [
+    'À noite, escolha alguém para proteger do ataque dos assassinos.',
+    'Você pode se proteger uma única vez na partida e não pode repetir o alvo da noite anterior.',
+    'Não conte a ninguém quem você salvou — isso entrega sua identidade.',
+  ],
+  [Role.DETETIVE]: [
+    'À noite, investigue um suspeito; o resultado chega ao seu caderno no amanhecer.',
+    '“Suspeito” significa assassino; “não suspeito”, qualquer outro papel.',
+    'Cuidado ao revelar o que sabe: detetives expostos viram alvo na mesma noite.',
+  ],
+  [Role.BRUXA]: [
+    'Você tem 2 poções para a partida inteira: uma mata, outra protege a cidade toda por uma noite.',
+    'Cada noite escolha uma opção — ou guarde as poções para um momento decisivo.',
+    'A poção da morte funciona mesmo se o Médico proteger o alvo. Use com sabedoria.',
+  ],
+  [Role.CIDADAO]: [
+    'À noite, anote em segredo um palpite de quem parece suspeito.',
+    'De dia, observe contradições: quem acusa demais? Quem se defende rápido demais?',
+    'Seu voto é a arma da cidade — convença os outros e concentre votos no julgamento.',
+  ],
+};
+
 export const RoleRevealModal: React.FC<RoleRevealModalProps> = ({
   role,
   isMayor,
@@ -68,7 +97,19 @@ export const RoleRevealModal: React.FC<RoleRevealModalProps> = ({
                 <span className="block text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-1">
                   Como jogar
                 </span>
-                <p className="text-xs text-slate-200 leading-normal">{meta.abilityDescription}</p>
+                <ol className="space-y-1.5">
+                  {TUTORIAL_STEPS[role].map((step, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs text-slate-200 leading-normal">
+                      <span
+                        className="shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold mt-0.5"
+                        style={{ backgroundColor: `${meta.color}25`, color: meta.color }}
+                      >
+                        {i + 1}
+                      </span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
               </div>
             </div>
           ) : (

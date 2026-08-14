@@ -239,24 +239,44 @@ export function makeNameSprite(
   return sprite;
 }
 
-/** Sprite "💤" para o sono noturno. */
-export function makeSleepSprite(): THREE.Sprite {
+/** Sprite de um único emoji (💤 do sono, balões de reação etc.). */
+export function makeEmojiSprite(emoji: string, opts: { bubble?: boolean } = {}): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 128;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = '84px system-ui, sans-serif';
+
+  if (opts.bubble) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.beginPath();
+    ctx.arc(64, 58, 52, 0, Math.PI * 2);
+    ctx.fill();
+    // rabinho do balão
+    ctx.beginPath();
+    ctx.moveTo(48, 102);
+    ctx.lineTo(64, 126);
+    ctx.lineTo(78, 102);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.font = opts.bubble ? '64px system-ui, sans-serif' : '84px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('💤', 64, 70);
+  ctx.fillText(emoji, 64, opts.bubble ? 62 : 70);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0.9 });
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0.95 });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(0.7, 0.7, 1);
   sprite.renderOrder = 10;
   return sprite;
+}
+
+/** Sprite "💤" para o sono noturno. */
+export function makeSleepSprite(): THREE.Sprite {
+  return makeEmojiSprite('💤');
 }
 
 // ── Geometrias e materiais compartilhados dos avatares ─────────────────────

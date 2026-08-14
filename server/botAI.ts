@@ -118,8 +118,11 @@ export function processBotActions(engine: GameEngine): void {
   }
 
   if (engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF) {
+    const sequential = engine.isSequentialVoting();
     bots.forEach(bot => {
       if (engine.pendingVotes.has(bot.id)) return;
+      // No modo sequencial, só o votante da vez declara (com uma pausa dramática)
+      if (sequential && engine.currentVoterId !== bot.id) return;
       if (engine.phaseTimeRemaining > 4 && Math.random() > BOT_ACT_CHANCE) return;
 
       let eligible = alivePlayers.filter(p => p.id !== bot.id);

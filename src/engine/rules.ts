@@ -3,7 +3,7 @@
  * Segue o PRD 1.0 (seção 3) e docs/game-rules.md
  */
 
-import { Role, RoleAlignment, RoomConfig } from './types.ts';
+import { Role, RoleAlignment, RoomConfig, VotingMode } from './types.ts';
 
 export const ROLE_METADATA: Record<
   Role,
@@ -76,6 +76,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   nightDurationSeconds: 30,
   discussionDurationSeconds: 90,
   votingDurationSeconds: 35,
+  votingMode: VotingMode.SECRET,
   revealRoleOnDeath: false,
   enableMayorTiebreak: true,
 };

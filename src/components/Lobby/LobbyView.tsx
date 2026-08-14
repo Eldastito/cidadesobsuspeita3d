@@ -19,7 +19,7 @@ import {
   Users,
   WifiOff,
 } from 'lucide-react';
-import { GamePhase, PrivatePlayerSnapshot, Role, RoomConfig } from '../../engine/types.ts';
+import { GamePhase, PrivatePlayerSnapshot, Role, RoomConfig, VotingMode } from '../../engine/types.ts';
 import { getRecommendedRoles, ROLE_METADATA, validateComposition } from '../../engine/rules.ts';
 import { MovementBus } from '../../services/gameClient.ts';
 import { TownSquare3D } from '../3D/TownSquare3D.tsx';
@@ -475,6 +475,18 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                     {s}s
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">Modo de votação</span>
+              <select
+                value={config.votingMode}
+                disabled={!isHost}
+                onChange={e => onUpdateConfig({ votingMode: e.target.value as VotingMode })}
+                className="bg-ink-950 border border-white/10 rounded px-2 py-1 text-slate-200"
+              >
+                <option value={VotingMode.SECRET}>Secreta simultânea</option>
+                <option value={VotingMode.SEQUENTIAL}>Aberta em sequência (clássica)</option>
               </select>
             </label>
           </div>

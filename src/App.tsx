@@ -72,6 +72,11 @@ export default function App() {
   const isDayResolution = phase === GamePhase.DAY_RESOLUTION;
   const isFinished = phase === GamePhase.FINISHED;
 
+  // Eliminado do julgamento (para a encenação na praça 3D)
+  const eliminatedPlayerId = isDayResolution
+    ? snapshot?.room.lastVotingSummary?.eliminatedPlayerId ?? null
+    : null;
+
   return (
     <div className="min-h-screen text-slate-300 flex flex-col selection:bg-lantern-400 selection:text-ink-950">
       <Navbar
@@ -132,6 +137,7 @@ export default function App() {
                     selectedTargetId={selectedTargetId}
                     onSelectPlayer={setSelectedTargetId}
                     movementBus={movementBus}
+                    eliminatedPlayerId={eliminatedPlayerId}
                   />
                 ) : (
                   <TownSquare2D

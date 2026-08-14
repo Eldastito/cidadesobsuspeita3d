@@ -176,7 +176,23 @@ export class VillageScene {
 
   // ── API pública (chamada pelo componente React) ─────────────────────────
 
-  public setPhase(phase: GamePhase): void {
+  /**
+   * Muda a fase; se um jogador foi eliminado em julgamento, agenda a
+   * encenação (caminhada ao centro da praça) antes do snapshot marcá-lo morto.
+   */
+  public setPhase(phase: GamePhase, trialEliminatedId?: string | null): void {
+    if (trialEliminatedId) {
+      const rig = this.rigs.get(trialEliminatedId);
+      if (rig) {
+        const seatNumber = (rig.group.userData.seatNumber as number) ?? 0;
+        const seat = seatPositionFor(seatNumber, this.totalSeats);
+        // O palco fica entre a fonte e o assento do condenado
+        const angle = Math.atan2(seat.x, seat.z);
+        const stagePos = { x: Math.sin(angle) * 4.6, z: Math.cos(angle) * 4.6 };
+        rig.prepareTrial(stagePos, seat);
+      }
+    }
+
     if (this.phase === phase) return;
     this.phase = phase;
     this.envTarget = cloneEnv(environmentForPhase(phase));
@@ -196,6 +212,13 @@ export class VillageScene {
     }
   }
 
+  /** Mostra um balão de reação sobre o avatar. */
+  public showEmote(playerId: string, emoji: string): void {
+    this.rigs.get(playerId)?.showEmote(emoji);
+  }
+
+  private lastPublicVotes = new Map<string, string | null>();
+
   public syncPlayers(players: PublicPlayerView[], localPlayerId: string, selectedTargetId: string | null): void {
     this.localPlayerId = localPlayerId;
     this.selectedTargetId = selectedTargetId;
@@ -203,6 +226,7 @@ export class VillageScene {
 
     const seen = new Set<string>();
     const isNight = NIGHT_PHASES.has(this.phase);
+    const isVotingPhase = this.phase === GamePhase.VOTING || this.phase === GamePhase.RUNOFF;
 
     players.forEach(player => {
       seen.add(player.id);
@@ -235,6 +259,20 @@ export class VillageScene {
       } else {
         rig.group.userData.seatNumber = player.seatNumber;
         rig.refreshVisualState(visual);
+      }
+
+      // Voto declarado em voz alta (modo sequencial): o votante aponta o alvo
+      if (isVotingPhase && player.votedTargetId !== undefined) {
+        const previous = this.lastPublicVotes.get(player.id);
+        if (player.votedTargetId && player.votedTargetId !== previous) {
+          const targetRig = this.rigs.get(player.votedTargetId);
+          if (targetRig && rig) {
+            rig.pointAt(targetRig.group.position);
+          }
+        }
+        this.lastPublicVotes.set(player.id, player.votedTargetId ?? null);
+      } else if (!isVotingPhase) {
+        this.lastPublicVotes.delete(player.id);
       }
     });
 

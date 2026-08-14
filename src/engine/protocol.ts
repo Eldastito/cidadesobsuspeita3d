@@ -52,6 +52,11 @@ export type ClientMessage =
       type: 'player.move';
       payload: { x: number; z: number; ry: number };
     }
+  | {
+      /** Reação rápida (emoji de lista fechada); efêmera e cosmética. */
+      type: 'player.emote';
+      payload: { emoji: string };
+    }
   | { type: 'chat.send'; payload: { text: string } }
   | { type: 'bot.fill'; payload: { count: number } }
   | { type: 'bot.remove'; payload?: {} }
@@ -68,6 +73,11 @@ export type ServerMessage =
       /** Posições dos avatares (10 Hz), volátil e cosmético. */
       type: 'player.positions';
       payload: { positions: PlayerPositionMap };
+    }
+  | {
+      /** Reação de um jogador, retransmitida à sala (não persiste). */
+      type: 'player.emote.shown';
+      payload: { playerId: string; emoji: string };
     }
   | { type: 'chat.message'; payload: ChatMessage }
   | { type: 'chat.history'; payload: { messages: ChatMessage[] } }
