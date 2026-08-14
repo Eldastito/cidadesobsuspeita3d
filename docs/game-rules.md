@@ -38,7 +38,7 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 | Votação padrão | **secreta e simultânea**; resultado só na apuração. Modo opcional **aberto em sequência** (como no vídeo): voto declarado em voz alta, público e definitivo, na ordem dos assentos, com janela de 15 s por votante (silêncio = abstenção) |
 | Comunicação | texto (voz fica para fase futura) |
 | Sala | 5 a 12 jogadores |
-| Herança de papel | **não existe** — papel de morto não é transferido |
+| Herança de papel | **desligada por padrão**. Como modo personalizado (Fase 5): quando Médico, Detetive, Bruxa ou Guarda-costas morre, um **Cidadão vivo sorteado (CSPRNG) herda o papel em segredo** — cargas restantes da Bruxa e restrições do Médico acompanham; o caderno do Detetive começa vazio; **Assassinos nunca são herdados**. A vila recebe só um aviso genérico ("um poder mudou de mãos"); os detalhes aparecem apenas no pós-jogo |
 
 ## 4. Papéis
 
@@ -68,6 +68,13 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
   também serve para esconder o timing de quem age de verdade).
 - Debate e vota durante o dia.
 
+### Guarda-costas 🛡️ (expansão da Fase 5, opcional)
+- Escolhe um morador vivo para escoltar a cada noite (nunca a si mesmo).
+- Se os assassinos atacarem o escoltado e nenhuma proteção (Médico/escudo da
+  Bruxa) bloquear o golpe, **o Guarda-costas morre no lugar da vítima**.
+- Se o próprio Guarda-costas for o alvo direto, morre normalmente.
+- Com mais de um guarda, o de menor assento prevalece (determinístico).
+
 ### Prefeito 👑 (opcional)
 - Papel **público**, acumulado com o papel secreto de um não-assassino.
 - Em empate na votação, dá o **voto de minerva** entre os empatados.
@@ -79,10 +86,11 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 2. Determinar o alvo dos assassinos (maioria; empate sorteado);
 3. Aplicar proteção coletiva da Bruxa;
 4. Aplicar proteção do Médico;
-5. Aplicar poção de morte da Bruxa;
-6. Registrar investigação do Detetive (e palpites de cidadãos);
-7. Consolidar mortes **sem revelar autores**;
-8. Anunciar o amanhecer; **só então** verificar vitória.
+5. Aplicar a escolta do Guarda-costas (se o alvo não foi salvo, o guarda morre no lugar);
+6. Aplicar poção de morte da Bruxa;
+7. Registrar investigação do Detetive (e palpites de cidadãos);
+8. Consolidar mortes **sem revelar autores** e aplicar herança de papel (se ligada);
+9. Anunciar o amanhecer; **só então** verificar vitória.
 
 Se a Bruxa mata o mesmo alvo dos assassinos, há **uma única morte**. Reenvio de ação
 substitui a anterior (idempotência) — nunca duplica efeito.

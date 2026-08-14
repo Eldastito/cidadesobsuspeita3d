@@ -248,7 +248,7 @@ export class VillageScene {
 
       let rig = this.rigs.get(player.id);
       if (!rig) {
-        rig = new AvatarRig(player.id, player.avatarId, player.seatNumber, visual);
+        rig = new AvatarRig(player.id, player.avatarId, player.seatNumber, visual, player.avatarColor);
         rig.group.userData.seatNumber = player.seatNumber;
         const seat = seatPositionFor(player.seatNumber, this.totalSeats);
         rig.snapTo(seat.x, seat.z, seat.ry);

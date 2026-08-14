@@ -83,6 +83,11 @@ export function processBotActions(engine: GameEngine): void {
         const target = pool[Math.floor(Math.random() * pool.length)];
         if (target) submit(NightActionType.INVESTIGATE, target.id);
         else submit(NightActionType.PASS);
+      } else if (bot.role === Role.GUARDA) {
+        const targets = alivePlayers.filter(p => p.id !== bot.id);
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        if (target) submit(NightActionType.BODYGUARD, target.id);
+        else submit(NightActionType.PASS);
       } else if (bot.role === Role.BRUXA) {
         if (bot.witchCharges.hasProtectAllPotion && engine.roundNumber >= 2 && Math.random() < 0.25) {
           submit(NightActionType.WITCH_PROTECT_ALL);

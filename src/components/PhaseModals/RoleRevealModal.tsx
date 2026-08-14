@@ -13,6 +13,8 @@ interface RoleRevealModalProps {
   isMayor: boolean;
   hasConfirmed: boolean;
   onConfirm: () => void;
+  /** Modo herança: o jogador acabou de herdar este papel em segredo. */
+  isInheritance?: boolean;
 }
 
 /** Tutorial curto e específico por papel (PRD 6.3). */
@@ -37,6 +39,11 @@ const TUTORIAL_STEPS: Record<Role, string[]> = {
     'Cada noite escolha uma opção — ou guarde as poções para um momento decisivo.',
     'A poção da morte funciona mesmo se o Médico proteger o alvo. Use com sabedoria.',
   ],
+  [Role.GUARDA]: [
+    'À noite, escolha alguém para escoltar — você não pode escoltar a si mesmo.',
+    'Se os assassinos atacarem essa pessoa, você morre no lugar dela.',
+    'Proteja quem parece importante para a cidade, mas sem se entregar no debate.',
+  ],
   [Role.CIDADAO]: [
     'À noite, anote em segredo um palpite de quem parece suspeito.',
     'De dia, observe contradições: quem acusa demais? Quem se defende rápido demais?',
@@ -49,6 +56,7 @@ export const RoleRevealModal: React.FC<RoleRevealModalProps> = ({
   isMayor,
   hasConfirmed,
   onConfirm,
+  isInheritance = false,
 }) => {
   const [isRevealed, setIsRevealed] = useState(true);
   const meta = ROLE_METADATA[role];
@@ -58,9 +66,16 @@ export const RoleRevealModal: React.FC<RoleRevealModalProps> = ({
       <div className="phase-banner w-full max-w-md bg-ink-900 border border-white/10 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 text-center">
         <div className="space-y-0.5">
           <span className="text-[10px] uppercase tracking-[0.3em] text-lantern-300 font-bold block">
-            Papel secreto
+            {isInheritance ? 'Herança secreta' : 'Papel secreto'}
           </span>
-          <h2 className="font-display text-base font-bold text-white">Seu destino nesta partida</h2>
+          <h2 className="font-display text-base font-bold text-white">
+            {isInheritance ? 'Um poder caiu em suas mãos' : 'Seu destino nesta partida'}
+          </h2>
+          {isInheritance && (
+            <p className="text-[11px] text-slate-400 pt-1">
+              Quem carregava este papel morreu — e a vila jamais saberá que agora ele é seu.
+            </p>
+          )}
         </div>
 
         {/* Carta do papel */}

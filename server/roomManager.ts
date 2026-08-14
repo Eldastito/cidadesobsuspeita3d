@@ -398,9 +398,20 @@ export class RoomManager {
 
   // ── Entrada e saída de salas ─────────────────────────────────────────────
 
+  private sanitizeAvatarColor(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isInteger(value)) return undefined;
+    return Math.max(0, Math.min(11, value));
+  }
+
   private onRoomCreate(
     socket: WebSocket,
-    payload: { nickname: string; avatarId: string; config?: Partial<RoomConfig>; guestId?: string }
+    payload: {
+      nickname: string;
+      avatarId: string;
+      avatarColor?: number;
+      config?: Partial<RoomConfig>;
+      guestId?: string;
+    }
   ): void {
     const roomId = `room-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const roomCode = this.generateRoomCode();
@@ -421,7 +432,8 @@ export class RoomManager {
       payload.avatarId || 'avatar-1',
       true,
       false,
-      payload.guestId
+      payload.guestId,
+      this.sanitizeAvatarColor(payload.avatarColor)
     );
     engine.setPlayerReady(playerId, true);
 
@@ -447,7 +459,14 @@ export class RoomManager {
 
   private onRoomJoin(
     socket: WebSocket,
-    payload: { roomCode: string; nickname: string; avatarId: string; sessionId?: string; guestId?: string }
+    payload: {
+      roomCode: string;
+      nickname: string;
+      avatarId: string;
+      avatarColor?: number;
+      sessionId?: string;
+      guestId?: string;
+    }
   ): void {
     const normalizedCode = (payload.roomCode || '').trim().toUpperCase();
     const roomId = this.roomByCode.get(normalizedCode);
@@ -484,7 +503,8 @@ export class RoomManager {
         payload.avatarId || 'avatar-1',
         false,
         false,
-        payload.guestId
+        payload.guestId,
+        this.sanitizeAvatarColor(payload.avatarColor)
       );
     } else {
       player.isConnected = true;

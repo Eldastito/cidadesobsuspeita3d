@@ -91,7 +91,8 @@ export class GameEngine {
     avatarId: string,
     isHost: boolean,
     isBot: boolean = false,
-    guestId?: string
+    guestId?: string,
+    avatarColor?: number
   ): Player {
     const existing = this.players.get(id);
     if (existing) {
@@ -100,6 +101,7 @@ export class GameEngine {
       existing.avatarId = avatarId;
       existing.isConnected = true;
       if (guestId) existing.guestId = guestId;
+      if (avatarColor !== undefined) existing.avatarColor = avatarColor;
       return existing;
     }
 
@@ -115,6 +117,7 @@ export class GameEngine {
       guestId,
       nickname,
       avatarId,
+      avatarColor,
       isHost,
       isBot,
       isReady: isBot,
@@ -208,6 +211,7 @@ export class GameEngine {
       player.hasRaisedHand = false;
       player.deathReason = undefined;
       player.deathRound = undefined;
+      player.inheritedRoleRound = undefined;
       player.isMayor = false;
     });
 
@@ -257,6 +261,7 @@ export class GameEngine {
       p.hasRaisedHand = false;
       p.deathReason = undefined;
       p.deathRound = undefined;
+      p.inheritedRoleRound = undefined;
     });
     // Remove jogadores que abandonaram durante a partida
     Array.from(this.players.values())
@@ -341,6 +346,15 @@ export class GameEngine {
         }
         if (target.id === player.id) {
           return { accepted: false, message: 'O Detetive não investiga a si mesmo.' };
+        }
+        break;
+      }
+      case Role.GUARDA: {
+        if (submission.actionType !== NightActionType.BODYGUARD || !target || !target.isAlive) {
+          return { accepted: false, message: 'Escolha um morador vivo para escoltar.' };
+        }
+        if (target.id === player.id) {
+          return { accepted: false, message: 'O Guarda-costas não escolta a si mesmo.' };
         }
         break;
       }
@@ -465,17 +479,44 @@ export class GameEngine {
       }
     }
 
+    // 5c. Escolta do Guarda-costas (expansão)
+    let bodyguardId: string | null = null;
+    let bodyguardTargetId: string | null = null;
+    const bodyguards = alivePlayers
+      .filter(p => p.role === Role.GUARDA)
+      .sort((a, b) => a.seatNumber - b.seatNumber);
+    for (const guard of bodyguards) {
+      const act = this.pendingNightActions.get(guard.id);
+      if (act && act.actionType === NightActionType.BODYGUARD && act.targetId) {
+        bodyguardId = guard.id;
+        bodyguardTargetId = act.targetId;
+        break; // com mais de um guarda, o de menor assento prevalece (determinístico)
+      }
+    }
+
     // 6. Consolidação das mortes (idempotente via Set)
     const deadSet = new Set<string>();
+    let bodyguardSacrificed = false;
 
     if (assassinTargetId) {
       const isProtected = witchUsedProtectAll || doctorTargetId === assassinTargetId;
       if (!isProtected) {
-        deadSet.add(assassinTargetId);
-        const p = this.players.get(assassinTargetId);
-        if (p) {
-          p.deathReason = 'ASSASSIN_ATTACK';
-          p.deathRound = this.roundNumber;
+        // O Guarda-costas intercepta o golpe e morre no lugar da vítima
+        if (bodyguardId && bodyguardTargetId === assassinTargetId) {
+          bodyguardSacrificed = true;
+          deadSet.add(bodyguardId);
+          const guard = this.players.get(bodyguardId);
+          if (guard) {
+            guard.deathReason = 'BODYGUARD_SACRIFICE';
+            guard.deathRound = this.roundNumber;
+          }
+        } else {
+          deadSet.add(assassinTargetId);
+          const p = this.players.get(assassinTargetId);
+          if (p) {
+            p.deathReason = 'ASSASSIN_ATTACK';
+            p.deathRound = this.roundNumber;
+          }
         }
       }
     }
@@ -523,10 +564,67 @@ export class GameEngine {
       `Amanhecer do dia ${this.roundNumber}`,
       narrativeText,
       { killedPlayerIds: Array.from(deadSet) },
-      { assassinTargetId, doctorTargetId, witchUsedProtectAll, witchKillTargetId }
+      {
+        assassinTargetId,
+        doctorTargetId,
+        witchUsedProtectAll,
+        witchKillTargetId,
+        bodyguardId,
+        bodyguardTargetId,
+        bodyguardSacrificed,
+      }
     );
 
+    // Modo herança: poderes perdidos passam a Cidadãos sorteados
+    this.applyInheritance(Array.from(deadSet));
+
     return this.dawnSummary;
+  }
+
+  /**
+   * Modo herança (Fase 5, opcional): quando Médico, Detetive, Bruxa ou
+   * Guarda-costas morre, um Cidadão vivo sorteado herda o papel em segredo.
+   * Cargas restantes (Bruxa) e restrições do Médico acompanham o papel;
+   * o caderno do Detetive começa vazio. Assassinos nunca são herdados.
+   */
+  private applyInheritance(deadIds: string[]): void {
+    if (!this.config.roleInheritance) return;
+
+    const INHERITABLE = new Set([Role.MEDICO, Role.DETETIVE, Role.BRUXA, Role.GUARDA]);
+
+    for (const deadId of deadIds) {
+      const dead = this.players.get(deadId);
+      if (!dead || !INHERITABLE.has(dead.role)) continue;
+
+      const heirs = Array.from(this.players.values()).filter(
+        p => p.isAlive && p.role === Role.CIDADAO
+      );
+      const heir = securePick(heirs);
+      if (!heir) continue; // sem cidadãos vivos, o poder se perde
+
+      heir.role = dead.role;
+      heir.inheritedRoleRound = this.roundNumber;
+      heir.hasConfirmedRole = heir.isBot; // humanos veem o aviso secreto de herança
+      if (dead.role === Role.BRUXA) {
+        heir.witchCharges = { ...dead.witchCharges };
+      }
+      if (dead.role === Role.MEDICO) {
+        heir.doctorSelfHealUsed = dead.doctorSelfHealUsed;
+        heir.lastDoctorTargetId = dead.lastDoctorTargetId;
+      }
+      if (dead.role === Role.DETETIVE) {
+        heir.investigationLog = [];
+      }
+
+      // Aviso público genérico (não revela papel nem herdeiro); detalhes só no pós-jogo
+      this.addTimelineEvent(
+        'ROLE_INHERITED',
+        `Herança — dia ${this.roundNumber}`,
+        'Um poder da cidade não morreu com seu dono: alguém o herdou em segredo.',
+        undefined,
+        { role: dead.role, fromId: dead.id, toId: heir.id }
+      );
+    }
   }
 
   public startDawn(): void {
@@ -818,6 +916,8 @@ export class GameEngine {
           : `Por decisão da maioria, ${victim.nickname} foi eliminado pela cidade.`,
         { eliminatedPlayerId: victim.id, votes: votesRecord, mayorDecided }
       );
+
+      this.applyInheritance([victim.id]);
     }
 
     this.lastVotingSummary = {
@@ -1023,6 +1123,7 @@ export class GameEngine {
         id: p.id,
         nickname: p.nickname,
         avatarId: p.avatarId,
+        avatarColor: p.avatarColor,
         isHost: p.isHost,
         isBot: p.isBot,
         isReady: p.isReady,
@@ -1067,6 +1168,7 @@ export class GameEngine {
         isMayor: player.isMayor,
         role: player.role,
         hasConfirmedRole: player.hasConfirmedRole,
+        inheritedRoleRound: player.inheritedRoleRound,
         witchCharges: player.role === Role.BRUXA ? player.witchCharges : undefined,
         doctorSelfHealUsed: player.role === Role.MEDICO ? player.doctorSelfHealUsed : undefined,
         lastDoctorTargetId: player.role === Role.MEDICO ? player.lastDoctorTargetId : undefined,
