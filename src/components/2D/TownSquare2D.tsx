@@ -28,7 +28,7 @@ export const TownSquare2D: React.FC<TownSquare2DProps> = ({
     <div className="w-full h-full min-h-[380px] bg-[#0F1116] p-3 sm:p-4 flex flex-col justify-between overflow-y-auto font-sans">
       {/* Header Info */}
       <div className="flex items-center justify-between pb-2.5 border-b border-white/5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-        <span className="font-bold text-slate-300">PLANO TÁTICO DA PRAÇA (2D)</span>
+        <span className="font-bold text-slate-300">PRAÇA EM MODO 2D (ACESSÍVEL)</span>
         <span className="text-emerald-400 font-bold">
           {players.filter(p => p.isAlive).length} VIVOS / {players.length} TOTAL
         </span>
@@ -86,7 +86,7 @@ export const TownSquare2D: React.FC<TownSquare2DProps> = ({
                   <p className="text-xs font-bold text-white truncate">{player.nickname}</p>
                   {isLocal && (
                     <span className="text-[8px] px-1 py-0.2 rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-mono font-bold uppercase">
-                      YOU
+                      VOCÊ
                     </span>
                   )}
                 </div>
@@ -108,7 +108,7 @@ export const TownSquare2D: React.FC<TownSquare2DProps> = ({
       </div>
 
       <div className="text-[10px] font-mono uppercase tracking-wider text-slate-600 pt-2 border-t border-white/5 text-center">
-        SELECIONE UM CIDADÃO ATIVO PARA APLICAR AÇÃO TÁTICA OU VOTO
+        TOQUE EM UM MORADOR VIVO PARA SELECIONAR ALVO DE AÇÃO OU VOTO
       </div>
     </div>
   );

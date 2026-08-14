@@ -1,96 +1,204 @@
 /**
- * Cidade Sob Suspeita 3D - Voting Panel (High Density Theme)
- * Day Voting, Runoffs, and Mayor Tiebreak Decisions
+ * Cidade Sob Suspeita 3D — Painel do tribunal
+ * Votação secreta, segundo turno restrito aos empatados,
+ * voto de minerva do Prefeito e faixa de veredito.
  */
 
 import React from 'react';
-import { Check, Crown, Eye, UserX, Vote } from 'lucide-react';
-import { GamePhase, PrivatePlayerSnapshot, PublicPlayerView } from '../../engine/types.ts';
+import { Check, Crown, Gavel, UserX, Vote } from 'lucide-react';
+import { GamePhase, PrivatePlayerSnapshot } from '../../engine/types.ts';
+import { ROLE_METADATA } from '../../engine/rules.ts';
 
 interface VotingPanelProps {
   snapshot: PrivatePlayerSnapshot;
   selectedTargetId: string | null;
   onSubmitVote: (targetId: string | null) => void;
+  onSubmitMayorTiebreak: (targetId: string) => void;
 }
 
 export const VotingPanel: React.FC<VotingPanelProps> = ({
   snapshot,
   selectedTargetId,
   onSubmitVote,
+  onSubmitMayorTiebreak,
 }) => {
   const { player, room } = snapshot;
-  const isMayorTiebreak = room.phase === GamePhase.MAYOR_TIEBREAK;
+  const phase = room.phase;
+  const isRunoff = phase === GamePhase.RUNOFF;
+  const isMayorTiebreak = phase === GamePhase.MAYOR_TIEBREAK;
+  const isDayResolution = phase === GamePhase.DAY_RESOLUTION;
   const selectedTarget = room.players.find(p => p.id === selectedTargetId);
-  const myCurrentVote = player.currentVote;
+  const tieCandidates = room.tieCandidateIds
+    .map(id => room.players.find(p => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => !!p);
+
+  // ── Veredito do dia (após a apuração) ────────────────────────────────────
+  if (isDayResolution) {
+    const summary = room.lastVotingSummary;
+    const roleMeta = summary?.revealedRole ? ROLE_METADATA[summary.revealedRole] : null;
+    return (
+      <div className="phase-banner bg-ink-900 border border-white/10 rounded-2xl p-4 text-center space-y-2 shadow-lg">
+        <div className="w-10 h-10 mx-auto rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
+          <Gavel className="w-5 h-5 text-lantern-300" />
+        </div>
+        {summary?.eliminatedNickname ? (
+          <>
+            <h4 className="text-sm font-bold text-white">
+              {summary.eliminatedNickname} foi eliminado pela cidade
+              {summary.mayorDecided ? ' (voto de minerva do Prefeito)' : ''}
+            </h4>
+            {roleMeta && (
+              <p className="text-xs" style={{ color: roleMeta.color }}>
+                {roleMeta.emoji} Seu papel era: <strong>{roleMeta.name}</strong>
+              </p>
+            )}
+          </>
+        ) : (
+          <h4 className="text-sm font-bold text-slate-300">Ninguém foi eliminado neste julgamento</h4>
+        )}
+        <p className="text-[11px] text-slate-500">A noite se aproxima…</p>
+      </div>
+    );
+  }
 
   if (!player.isAlive) {
     return (
-      <div className="bg-[#0F1116] border border-white/5 rounded-lg p-3 text-center font-mono">
+      <div className="bg-ink-900 border border-white/5 rounded-2xl p-3 text-center">
         <p className="text-[11px] text-slate-500">
-          👻 ESPECTADORES PÓSTUMOS NÃO VOTAM NO TRIBUNAL. AGUARDE A DELIBERAÇÃO.
+          👻 Espectadores não votam. Aguarde o veredito dos vivos.
         </p>
       </div>
     );
   }
 
+  // ── Voto de minerva do Prefeito ──────────────────────────────────────────
+  if (isMayorTiebreak) {
+    if (!player.isMayor) {
+      return (
+        <div className="bg-ink-900 border border-lantern-400/30 rounded-2xl p-4 text-center space-y-1.5 shadow-lg">
+          <Crown className="w-5 h-5 text-lantern-300 mx-auto" />
+          <h4 className="text-xs font-bold text-white">A votação empatou!</h4>
+          <p className="text-[11px] text-slate-400">
+            Empate entre <strong>{tieCandidates.map(c => c.nickname).join(' e ')}</strong>. O Prefeito
+            tem a palavra final.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className="bg-ink-900 border border-lantern-400/40 rounded-2xl p-4 space-y-3 shadow-lg">
+        <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+          <div className="p-1.5 rounded-lg bg-lantern-400/15 border border-lantern-400/30 text-lantern-300">
+            <Crown className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-lantern-300 block">
+              Voto de minerva
+            </span>
+            <h4 className="text-xs font-bold text-white">Prefeito, escolha quem será julgado</h4>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {tieCandidates.map(c => (
+            <button
+              key={c.id}
+              onClick={() => onSubmitMayorTiebreak(c.id)}
+              className="px-4 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5"
+            >
+              <UserX className="w-3.5 h-3.5" />
+              {c.nickname}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-500">
+          Se não decidir a tempo, a cidade fará um segundo turno.
+        </p>
+      </div>
+    );
+  }
+
+  // ── Votação normal / segundo turno ───────────────────────────────────────
+  const eligibleForRunoff =
+    !isRunoff || (selectedTarget && room.tieCandidateIds.includes(selectedTarget.id));
+  const canVote = selectedTarget && selectedTarget.isAlive && eligibleForRunoff;
+  const hasVoted = player.hasVoted;
+
   return (
-    <div className="bg-[#0F1116] border border-rose-500/30 rounded-lg p-3 sm:p-4 space-y-3 font-sans shadow-lg">
-      {/* Header Banner */}
+    <div className="bg-ink-900 border border-rose-500/30 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
       <div className="flex items-center justify-between border-b border-white/5 pb-2">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400">
+          <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400">
             <Vote className="w-4 h-4" />
           </div>
           <div>
-            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-rose-400 block">
-              TRIBUNAL DA CIDADE
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400 block">
+              {isRunoff ? 'Segundo turno' : 'Tribunal da praça'}
             </span>
             <h4 className="text-xs font-bold text-white">
-              {isMayorTiebreak ? 'Decisão de Desempate do Prefeito' : 'Votação de Julgamento'}
+              {isRunoff ? 'Vote apenas entre os empatados' : 'Quem deve ser julgado hoje?'}
             </h4>
           </div>
         </div>
-
-        {myCurrentVote !== undefined && myCurrentVote !== null && (
-          <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold flex items-center gap-1">
+        {hasVoted && (
+          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
             <Check className="w-3 h-3" />
-            VOTO REGISTRADO
+            Voto registrado
           </span>
         )}
       </div>
 
-      {/* Target Selector & Confirm */}
-      <div className="p-2.5 bg-black/40 border border-white/10 rounded flex flex-col sm:flex-row items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2 text-xs font-mono w-full sm:w-auto">
-          <span className="text-slate-500 text-[10px] uppercase">SEU VOTO EM:</span>
-          <span className="font-bold text-amber-400">
-            {selectedTarget ? `${selectedTarget.nickname} (#0${selectedTarget.seatNumber + 1})` : 'NENHUM ALVO SELECIONADO'}
+      {isRunoff && tieCandidates.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+          <span>Empatados:</span>
+          {tieCandidates.map(c => (
+            <span
+              key={c.id}
+              className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${
+                selectedTargetId === c.id
+                  ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                  : 'bg-white/5 border-white/10 text-slate-300'
+              }`}
+            >
+              {c.nickname}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="p-2.5 bg-ink-950/70 border border-white/10 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2 text-xs w-full sm:w-auto">
+          <span className="text-slate-500 text-[10px] uppercase">Seu voto:</span>
+          <span className="font-bold text-lantern-300">
+            {selectedTarget
+              ? selectedTarget.nickname
+              : 'toque em alguém na praça'}
           </span>
+          {isRunoff && selectedTarget && !eligibleForRunoff && (
+            <span className="text-[10px] text-rose-400">(fora do segundo turno)</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* Vote for Selected */}
           <button
             onClick={() => onSubmitVote(selectedTargetId)}
-            disabled={!selectedTarget || !selectedTarget.isAlive}
-            className="flex-1 sm:flex-none px-4 py-1.5 rounded bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white font-mono font-bold text-xs uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center gap-1.5"
+            disabled={!canVote}
+            className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
           >
             <UserX className="w-3.5 h-3.5" />
-            VOTAR NO ALVO
+            Votar
           </button>
-
-          {/* Abstain button */}
-          {!isMayorTiebreak && (
-            <button
-              onClick={() => onSubmitVote(null)}
-              className="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-mono font-bold uppercase transition-colors"
-            >
-              ABSTER
-            </button>
-          )}
+          <button
+            onClick={() => onSubmitVote(null)}
+            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold transition-colors"
+          >
+            Abster-se
+          </button>
         </div>
       </div>
+
+      <p className="text-[10px] text-slate-500">
+        O resultado só aparece quando a votação fecha. Você pode mudar o voto até o fim do tempo.
+      </p>
     </div>
   );
 };
-

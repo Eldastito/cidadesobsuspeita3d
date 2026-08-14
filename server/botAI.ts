@@ -1,10 +1,11 @@
 /**
- * Cidade Sob Suspeita 3D - Bot AI Behavior
- * Autonomous playtesting agents that follow canonical rules
+ * Cidade Sob Suspeita 3D — Comportamento dos bots
+ * Agentes neutros de preenchimento: seguem as regras canônicas,
+ * nunca inventam fala nem acusação social (PRD 11.3).
  */
 
 import { GameEngine } from '../src/engine/gameEngine.ts';
-import { GamePhase, NightActionType, Player, Role } from '../src/engine/types.ts';
+import { GamePhase, NightActionType, Role } from '../src/engine/types.ts';
 
 const BOT_NAMES = [
   'Carlos Silva',
@@ -28,12 +29,15 @@ export function getRandomBotName(usedNames: Set<string>): string {
   if (available.length > 0) {
     return available[Math.floor(Math.random() * available.length)];
   }
-  return `Convidado ${Math.floor(100 + Math.random() * 900)}`;
+  return `Morador ${Math.floor(100 + Math.random() * 900)}`;
 }
 
 export function getRandomBotAvatar(): string {
   return BOT_AVATARS[Math.floor(Math.random() * BOT_AVATARS.length)];
 }
+
+/** Probabilidade de agir por tick — espalha as ações dos bots pela fase. */
+const BOT_ACT_CHANCE = 0.3;
 
 export function processBotActions(engine: GameEngine): void {
   const bots = Array.from(engine.players.values()).filter(p => p.isBot && p.isAlive);
@@ -41,114 +45,115 @@ export function processBotActions(engine: GameEngine): void {
 
   if (engine.phase === GamePhase.ROLE_REVEAL) {
     bots.forEach(b => engine.confirmRole(b.id));
-  } else if (engine.phase === GamePhase.NIGHT_ACTIONS) {
+    return;
+  }
+
+  if (engine.phase === GamePhase.NIGHT_ACTIONS) {
     bots.forEach(bot => {
       if (engine.pendingNightActions.has(bot.id)) return;
+      // Age imediatamente quando o tempo está acabando
+      if (engine.phaseTimeRemaining > 4 && Math.random() > BOT_ACT_CHANCE) return;
+
+      const submit = (actionType: NightActionType, targetId?: string | null) =>
+        engine.submitNightAction({
+          playerId: bot.id,
+          actionType,
+          targetId,
+          clientActionId: `bot-${actionType}-${Date.now()}-${bot.id}`,
+          timestamp: Date.now(),
+        });
 
       if (bot.role === Role.ASSASSINO) {
-        const potentialTargets = alivePlayers.filter(p => p.role !== Role.ASSASSINO);
-        if (potentialTargets.length > 0) {
-          const target = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-          engine.submitNightAction({
-            playerId: bot.id,
-            actionType: NightActionType.KILL,
-            targetId: target.id,
-            clientActionId: `bot-kill-${Date.now()}-${bot.id}`,
-            timestamp: Date.now(),
-          });
-        }
+        const targets = alivePlayers.filter(p => p.role !== Role.ASSASSINO);
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        if (target) submit(NightActionType.KILL, target.id);
       } else if (bot.role === Role.MEDICO) {
-        const potentialTargets = alivePlayers.filter(p => {
+        const targets = alivePlayers.filter(p => {
           if (p.id === bot.id && bot.doctorSelfHealUsed) return false;
           if (p.id === bot.lastDoctorTargetId) return false;
           return true;
         });
-        if (potentialTargets.length > 0) {
-          const target = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-          engine.submitNightAction({
-            playerId: bot.id,
-            actionType: NightActionType.HEAL,
-            targetId: target.id,
-            clientActionId: `bot-heal-${Date.now()}-${bot.id}`,
-            timestamp: Date.now(),
-          });
-        }
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        if (target) submit(NightActionType.HEAL, target.id);
+        else submit(NightActionType.PASS);
       } else if (bot.role === Role.DETETIVE) {
-        const investigatedIds = new Set(bot.investigationLog.map(e => e.targetId));
-        const potentialTargets = alivePlayers.filter(p => p.id !== bot.id && !investigatedIds.has(p.id));
-        const targetList = potentialTargets.length > 0 ? potentialTargets : alivePlayers.filter(p => p.id !== bot.id);
-        if (targetList.length > 0) {
-          const target = targetList[Math.floor(Math.random() * targetList.length)];
-          engine.submitNightAction({
-            playerId: bot.id,
-            actionType: NightActionType.INVESTIGATE,
-            targetId: target.id,
-            clientActionId: `bot-inv-${Date.now()}-${bot.id}`,
-            timestamp: Date.now(),
-          });
-        }
+        const investigated = new Set(bot.investigationLog.map(e => e.targetId));
+        const fresh = alivePlayers.filter(p => p.id !== bot.id && !investigated.has(p.id));
+        const pool = fresh.length > 0 ? fresh : alivePlayers.filter(p => p.id !== bot.id);
+        const target = pool[Math.floor(Math.random() * pool.length)];
+        if (target) submit(NightActionType.INVESTIGATE, target.id);
+        else submit(NightActionType.PASS);
       } else if (bot.role === Role.BRUXA) {
-        // Witch decision heuristic: 20% protect all if round >= 2, 20% kill if suspicious, else pass
-        if (bot.witchCharges.hasProtectAllPotion && Math.random() < 0.25) {
-          engine.submitNightAction({
-            playerId: bot.id,
-            actionType: NightActionType.WITCH_PROTECT_ALL,
-            clientActionId: `bot-witch-prot-${Date.now()}-${bot.id}`,
-            timestamp: Date.now(),
-          });
-        } else if (bot.witchCharges.hasKillPotion && Math.random() < 0.2) {
-          const potentialTargets = alivePlayers.filter(p => p.id !== bot.id);
-          const target = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-          if (target) {
-            engine.submitNightAction({
-              playerId: bot.id,
-              actionType: NightActionType.WITCH_KILL,
-              targetId: target.id,
-              clientActionId: `bot-witch-kill-${Date.now()}-${bot.id}`,
-              timestamp: Date.now(),
-            });
-          }
+        if (bot.witchCharges.hasProtectAllPotion && engine.roundNumber >= 2 && Math.random() < 0.25) {
+          submit(NightActionType.WITCH_PROTECT_ALL);
+        } else if (bot.witchCharges.hasKillPotion && Math.random() < 0.15) {
+          const targets = alivePlayers.filter(p => p.id !== bot.id);
+          const target = targets[Math.floor(Math.random() * targets.length)];
+          if (target) submit(NightActionType.WITCH_KILL, target.id);
+          else submit(NightActionType.PASS);
         } else {
-          engine.submitNightAction({
-            playerId: bot.id,
-            actionType: NightActionType.PASS,
-            clientActionId: `bot-witch-pass-${Date.now()}-${bot.id}`,
-            timestamp: Date.now(),
-          });
+          submit(NightActionType.PASS);
         }
+      } else {
+        // Cidadão: registra um palpite privado ou apenas dorme
+        const targets = alivePlayers.filter(p => p.id !== bot.id);
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        if (target && Math.random() < 0.7) submit(NightActionType.OBSERVE, target.id);
+        else submit(NightActionType.PASS);
       }
     });
-  } else if (engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF || engine.phase === GamePhase.MAYOR_TIEBREAK) {
+    return;
+  }
+
+  if (engine.phase === GamePhase.MAYOR_TIEBREAK) {
+    const mayorBot = bots.find(b => b.isMayor);
+    if (mayorBot && engine.tieCandidateIds.length > 0) {
+      if (engine.phaseTimeRemaining <= 4 || Math.random() < BOT_ACT_CHANCE) {
+        const targetId =
+          engine.tieCandidateIds[Math.floor(Math.random() * engine.tieCandidateIds.length)];
+        engine.submitMayorTiebreak(mayorBot.id, targetId);
+      }
+    }
+    return;
+  }
+
+  if (engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF) {
     bots.forEach(bot => {
       if (engine.pendingVotes.has(bot.id)) return;
+      if (engine.phaseTimeRemaining > 4 && Math.random() > BOT_ACT_CHANCE) return;
 
-      if (engine.phase === GamePhase.MAYOR_TIEBREAK) {
-        if (bot.isMayor && engine.tieCandidateIds.length > 0) {
-          const targetId = engine.tieCandidateIds[Math.floor(Math.random() * engine.tieCandidateIds.length)];
-          engine.submitVote(bot.id, targetId);
-        }
-        return;
-      }
-
-      let eligibleTargets = alivePlayers.filter(p => p.id !== bot.id);
+      let eligible = alivePlayers.filter(p => p.id !== bot.id);
       if (engine.phase === GamePhase.RUNOFF) {
-        eligibleTargets = eligibleTargets.filter(p => engine.tieCandidateIds.includes(p.id));
-      }
-
-      // If detective found a suspicious assassin, vote for them!
-      if (bot.role === Role.DETETIVE) {
-        const knownSuspect = bot.investigationLog.find(e => e.isSuspicious && alivePlayers.some(p => p.id === e.targetId));
-        if (knownSuspect && (engine.phase !== GamePhase.RUNOFF || engine.tieCandidateIds.includes(knownSuspect.targetId))) {
-          engine.submitVote(bot.id, knownSuspect.targetId);
+        eligible = alivePlayers.filter(p => engine.tieCandidateIds.includes(p.id) && p.id !== bot.id);
+        if (eligible.length === 0) {
+          engine.submitVote(bot.id, null);
           return;
         }
       }
 
-      if (eligibleTargets.length > 0 && Math.random() > 0.1) {
-        const target = eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)];
+      // Detetive vota em suspeito confirmado quando possível
+      if (bot.role === Role.DETETIVE) {
+        const suspect = bot.investigationLog.find(
+          e => e.isSuspicious && alivePlayers.some(p => p.id === e.targetId)
+        );
+        if (
+          suspect &&
+          (engine.phase !== GamePhase.RUNOFF || engine.tieCandidateIds.includes(suspect.targetId))
+        ) {
+          engine.submitVote(bot.id, suspect.targetId);
+          return;
+        }
+      }
+
+      // Assassino nunca vota em comparsa
+      if (bot.role === Role.ASSASSINO) {
+        eligible = eligible.filter(p => p.role !== Role.ASSASSINO);
+      }
+
+      if (eligible.length > 0 && Math.random() > 0.1) {
+        const target = eligible[Math.floor(Math.random() * eligible.length)];
         engine.submitVote(bot.id, target.id);
       } else {
-        // Abstain
         engine.submitVote(bot.id, null);
       }
     });

@@ -1,19 +1,51 @@
 /**
- * Cidade Sob Suspeita 3D - WebSocket Game Client Service
+ * Cidade Sob Suspeita 3D — Cliente WebSocket do jogo
+ * Reconexão com retomada de sessão, legendas do narrador (acessibilidade)
+ * e canal de posições fora do estado React (atualiza a 10 Hz sem re-render).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChatMessage,
   GamePhase,
   NightActionType,
-  NightSubmission,
   PrivatePlayerSnapshot,
   RoomConfig,
-  VoteSubmission,
 } from '../engine/types.ts';
-import { ClientMessage, ServerMessage } from '../engine/protocol.ts';
+import { ClientMessage, PlayerPositionMap, ServerMessage } from '../engine/protocol.ts';
 import { sound } from './soundEffects.ts';
+
+const STORAGE_KEY = 'cidade-sob-suspeita:session';
+
+interface StoredSession {
+  roomCode: string;
+  sessionId: string;
+  nickname: string;
+  avatarId: string;
+}
+
+function loadStoredSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredSession(session: StoredSession | null): void {
+  try {
+    if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // armazenamento indisponível (modo privado etc.) — sessão só não é retomável
+  }
+}
+
+export interface NarratorCaption {
+  text: string;
+  key: number;
+}
 
 export interface GameClientState {
   isConnected: boolean;
@@ -23,7 +55,16 @@ export interface GameClientState {
   lastError: string | null;
   selectedTargetId: string | null;
   viewMode: '3D' | '2D';
+  narratorCaption: NarratorCaption | null;
 }
+
+/** Canal imperativo de posições — consumido direto pela cena 3D. */
+export interface MovementBus {
+  sendMove: (x: number, z: number, ry: number) => void;
+  subscribePositions: (cb: (positions: PlayerPositionMap) => void) => () => void;
+}
+
+type PositionListener = (positions: PlayerPositionMap) => void;
 
 export function useGameClient() {
   const [state, setState] = useState<GameClientState>({
@@ -34,128 +75,99 @@ export function useGameClient() {
     lastError: null,
     selectedTargetId: null,
     viewMode: '3D',
+    narratorCaption: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPhaseRef = useRef<GamePhase | null>(null);
-
-  const connect = () => {
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    setState(prev => ({ ...prev, isConnecting: true, lastError: null }));
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setState(prev => ({ ...prev, isConnected: true, isConnecting: false, lastError: null }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: ServerMessage = JSON.parse(event.data);
-        handleServerMessage(msg);
-      } catch (err) {
-        console.error('Failed to parse server message:', err);
-      }
-    };
-
-    ws.onclose = () => {
-      setState(prev => ({ ...prev, isConnected: false, isConnecting: false }));
-      // Attempt reconnect after 2.5 seconds
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = setTimeout(() => {
-        connect();
-      }, 2500);
-    };
-
-    ws.onerror = (err) => {
-      console.warn('WebSocket connection error:', err);
-      setState(prev => ({ ...prev, isConnected: false, isConnecting: false }));
-    };
-  };
-
-  useEffect(() => {
-    connect();
-    return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, []);
+  const storedSessionRef = useRef<StoredSession | null>(null);
+  const pendingIdentityRef = useRef<{ nickname: string; avatarId: string } | null>(null);
+  const positionListenersRef = useRef<Set<PositionListener>>(new Set());
 
   const send = (msg: ClientMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
-    } else {
-      console.warn('Cannot send message: WebSocket is not open');
     }
+  };
+
+  const narrate = (text: string) => {
+    sound.speakNarration(text);
+    setState(prev => ({ ...prev, narratorCaption: { text, key: Date.now() } }));
   };
 
   const handleServerMessage = (msg: ServerMessage) => {
     switch (msg.type) {
       case 'snapshot.private': {
         const snapshot = msg.payload;
-        
-        // Sound and narration triggers on phase transition
-        if (snapshot.room.phase !== lastPhaseRef.current) {
-          const currentPhase = snapshot.room.phase;
-          lastPhaseRef.current = currentPhase;
 
-          if (currentPhase === GamePhase.NIGHT_ACTIONS) {
+        if (snapshot.room.phase !== lastPhaseRef.current) {
+          const phase = snapshot.room.phase;
+          lastPhaseRef.current = phase;
+
+          if (phase === GamePhase.NIGHT_ACTIONS) {
             sound.playNightWhisper();
-            sound.speakNarration('A noite caiu sobre a cidade. Os personagens especiais agem nas sombras.');
-          } else if (currentPhase === GamePhase.DAWN) {
+            narrate('A noite caiu sobre a cidade. Fechem os olhos... alguns agirão nas sombras.');
+          } else if (phase === GamePhase.DAWN) {
             sound.playBellToll();
             if (snapshot.room.dawnSummary?.narrativeText) {
-              sound.speakNarration(snapshot.room.dawnSummary.narrativeText);
+              narrate(snapshot.room.dawnSummary.narrativeText);
             }
-          } else if (currentPhase === GamePhase.DISCUSSION) {
-            sound.speakNarration('O debate na praça começou. Descubram os culpados!');
-          } else if (currentPhase === GamePhase.VOTING) {
-            sound.speakNarration('A votação foi iniciada. Escolham seu voto com sabedoria.');
-          } else if (currentPhase === GamePhase.DAY_RESOLUTION) {
+          } else if (phase === GamePhase.DISCUSSION) {
+            narrate('O dia amanheceu de vez. Debatam na praça: quem está mentindo?');
+          } else if (phase === GamePhase.VOTING) {
+            narrate('A votação começou. Escolham com sabedoria — o voto é secreto.');
+          } else if (phase === GamePhase.RUNOFF) {
+            narrate('Empate! Segundo turno: votem novamente, apenas entre os empatados.');
+          } else if (phase === GamePhase.MAYOR_TIEBREAK) {
+            narrate('Empate na votação. A palavra final é do Prefeito.');
+          } else if (phase === GamePhase.DAY_RESOLUTION) {
             sound.playEliminationGavel();
-            if (snapshot.room.lastVotingSummary?.eliminatedNickname) {
-              sound.speakNarration(`${snapshot.room.lastVotingSummary.eliminatedNickname} foi eliminado pela cidade.`);
+            const summary = snapshot.room.lastVotingSummary;
+            if (summary?.eliminatedNickname) {
+              narrate(`${summary.eliminatedNickname} foi eliminado pela cidade.`);
+            } else if (summary) {
+              narrate('Ninguém foi eliminado neste julgamento.');
             }
-          } else if (currentPhase === GamePhase.FINISHED) {
+          } else if (phase === GamePhase.FINISHED) {
             sound.playVictoryFanfare();
             if (snapshot.room.winner === 'CIDADE') {
-              sound.speakNarration('A cidade venceu! Todos os assassinos foram derrotados.');
+              narrate('A cidade venceu! Todos os assassinos foram desmascarados.');
             } else if (snapshot.room.winner === 'ASSASSINOS') {
-              sound.speakNarration('Os assassinos triunfaram e dominaram a cidade!');
+              narrate('Os assassinos triunfaram e dominaram a cidade!');
             }
           }
         }
 
-        setState(prev => ({
-          ...prev,
-          snapshot,
-          lastError: null,
-        }));
+        setState(prev => ({ ...prev, snapshot, lastError: null }));
+        break;
+      }
+
+      case 'session.info': {
+        const identity = pendingIdentityRef.current;
+        const stored: StoredSession = {
+          roomCode: msg.payload.roomCode,
+          sessionId: msg.payload.sessionId,
+          nickname: identity?.nickname || storedSessionRef.current?.nickname || 'Morador',
+          avatarId: identity?.avatarId || storedSessionRef.current?.avatarId || 'avatar-1',
+        };
+        storedSessionRef.current = stored;
+        saveStoredSession(stored);
+        break;
+      }
+
+      case 'player.positions': {
+        positionListenersRef.current.forEach(cb => cb(msg.payload.positions));
         break;
       }
 
       case 'chat.message': {
-        setState(prev => ({
-          ...prev,
-          chatMessages: [...prev.chatMessages, msg.payload],
-        }));
+        setState(prev => ({ ...prev, chatMessages: [...prev.chatMessages, msg.payload] }));
         break;
       }
 
       case 'chat.history': {
-        setState(prev => ({
-          ...prev,
-          chatMessages: msg.payload.messages,
-        }));
+        setState(prev => ({ ...prev, chatMessages: msg.payload.messages }));
         break;
       }
 
@@ -166,59 +178,127 @@ export function useGameClient() {
         break;
       }
 
+      case 'room.left': {
+        storedSessionRef.current = null;
+        saveStoredSession(null);
+        lastPhaseRef.current = null;
+        setState(prev => ({
+          ...prev,
+          snapshot: null,
+          chatMessages: [],
+          selectedTargetId: null,
+          narratorCaption: null,
+        }));
+        break;
+      }
+
       case 'error.safe': {
+        // Sessão guardada não vale mais → limpa para não insistir
+        if (msg.payload.code === 'ROOM_NOT_FOUND' && storedSessionRef.current) {
+          storedSessionRef.current = null;
+          saveStoredSession(null);
+        }
         setState(prev => ({ ...prev, lastError: msg.payload.message }));
         break;
       }
     }
   };
 
-  // Helper actions
+  const connect = () => {
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    setState(prev => ({ ...prev, isConnecting: true }));
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setState(prev => ({ ...prev, isConnected: true, isConnecting: false }));
+      // Retomada automática após queda: reentra na sala com a mesma sessão
+      const stored = storedSessionRef.current;
+      if (stored) {
+        ws.send(
+          JSON.stringify({
+            type: 'room.join',
+            payload: {
+              roomCode: stored.roomCode,
+              nickname: stored.nickname,
+              avatarId: stored.avatarId,
+              sessionId: stored.sessionId,
+            },
+          } satisfies ClientMessage)
+        );
+      }
+    };
+
+    ws.onmessage = event => {
+      try {
+        handleServerMessage(JSON.parse(event.data));
+      } catch (err) {
+        console.error('Falha ao interpretar mensagem do servidor:', err);
+      }
+    };
+
+    ws.onclose = () => {
+      setState(prev => ({ ...prev, isConnected: false, isConnecting: false }));
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(connect, 2000);
+    };
+
+    ws.onerror = () => {
+      setState(prev => ({ ...prev, isConnected: false, isConnecting: false }));
+    };
+  };
+
+  useEffect(() => {
+    storedSessionRef.current = loadStoredSession();
+    connect();
+    return () => {
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (wsRef.current) wsRef.current.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Ações ────────────────────────────────────────────────────────────────
+
+  const newActionId = (prefix: string) =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
   const createRoom = (nickname: string, avatarId: string, config?: Partial<RoomConfig>) => {
-    send({
-      type: 'room.create',
-      payload: { nickname, avatarId, config },
-    });
+    pendingIdentityRef.current = { nickname, avatarId };
+    send({ type: 'room.create', payload: { nickname, avatarId, config } });
   };
 
   const joinRoom = (roomCode: string, nickname: string, avatarId: string) => {
-    send({
-      type: 'room.join',
-      payload: { roomCode, nickname, avatarId },
-    });
+    pendingIdentityRef.current = { nickname, avatarId };
+    send({ type: 'room.join', payload: { roomCode, nickname, avatarId } });
   };
 
-  const updateConfig = (config: RoomConfig) => {
-    send({
-      type: 'room.updateConfig',
-      payload: { config },
-    });
-  };
+  const leaveRoom = () => send({ type: 'room.leave' });
 
-  const setReady = (isReady: boolean) => {
-    send({
-      type: 'player.ready',
-      payload: { isReady },
-    });
-  };
+  const updateConfig = (config: Partial<RoomConfig>) =>
+    send({ type: 'room.updateConfig', payload: { config } });
 
-  const startMatch = () => {
-    send({ type: 'match.start' });
-  };
-
-  const confirmRole = () => {
-    send({ type: 'role.confirm' });
-  };
+  const setReady = (isReady: boolean) => send({ type: 'player.ready', payload: { isReady } });
+  const startMatch = () => send({ type: 'match.start' });
+  const confirmRole = () => send({ type: 'role.confirm' });
 
   const submitNightAction = (actionType: NightActionType, targetId?: string | null) => {
     sound.playVoteClick();
     send({
       type: 'night.action',
       payload: {
-        playerId: state.snapshot?.player.id || '',
+        playerId: '', // o servidor usa a identidade da conexão
         actionType,
         targetId,
-        clientActionId: `act-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        clientActionId: newActionId('act'),
         timestamp: Date.now(),
       },
     });
@@ -229,62 +309,64 @@ export function useGameClient() {
     send({
       type: 'vote.submit',
       payload: {
-        voterId: state.snapshot?.player.id || '',
+        voterId: '',
         targetId,
-        clientActionId: `vote-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        clientActionId: newActionId('vote'),
         timestamp: Date.now(),
       },
     });
   };
 
-  const toggleHandRaise = () => {
-    send({ type: 'player.handRaise' });
-  };
-
-  const sendChat = (text: string) => {
+  const submitMayorTiebreak = (targetId: string) => {
+    sound.playVoteClick();
     send({
-      type: 'chat.send',
-      payload: { text },
+      type: 'mayor.tiebreak.submit',
+      payload: { targetId, clientActionId: newActionId('mayor') },
     });
   };
 
-  const fillBots = (count: number) => {
-    send({
-      type: 'bot.fill',
-      payload: { count },
-    });
-  };
+  const toggleHandRaise = () => send({ type: 'player.handRaise' });
+  const sendChat = (text: string) => send({ type: 'chat.send', payload: { text } });
+  const fillBots = (count: number) => send({ type: 'bot.fill', payload: { count } });
+  const removeBots = () => send({ type: 'bot.remove' });
+  const restartMatch = () => send({ type: 'match.restart' });
 
-  const removeBots = () => {
-    send({ type: 'bot.remove' });
-  };
+  const setSelectedTargetId = (targetId: string | null) =>
+    setState(prev => ({
+      ...prev,
+      selectedTargetId: prev.selectedTargetId === targetId ? null : targetId,
+    }));
 
-  const restartMatch = () => {
-    send({ type: 'match.restart' });
-  };
-
-  const setSelectedTargetId = (targetId: string | null) => {
-    setState(prev => ({ ...prev, selectedTargetId: targetId }));
-  };
-
-  const toggleViewMode = () => {
+  const toggleViewMode = () =>
     setState(prev => ({ ...prev, viewMode: prev.viewMode === '3D' ? '2D' : '3D' }));
-  };
 
-  const dismissError = () => {
-    setState(prev => ({ ...prev, lastError: null }));
-  };
+  const dismissError = () => setState(prev => ({ ...prev, lastError: null }));
+
+  // Canal de movimento estável (não muda entre renders)
+  const movementBus = useMemo<MovementBus>(
+    () => ({
+      sendMove: (x, z, ry) => send({ type: 'player.move', payload: { x, z, ry } }),
+      subscribePositions: cb => {
+        positionListenersRef.current.add(cb);
+        return () => positionListenersRef.current.delete(cb);
+      },
+    }),
+    []
+  );
 
   return {
     ...state,
+    movementBus,
     createRoom,
     joinRoom,
+    leaveRoom,
     updateConfig,
     setReady,
     startMatch,
     confirmRole,
     submitNightAction,
     submitVote,
+    submitMayorTiebreak,
     toggleHandRaise,
     sendChat,
     fillBots,

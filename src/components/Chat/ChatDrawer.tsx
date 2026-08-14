@@ -72,7 +72,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             }`}
           >
             <Users className="w-3 h-3" />
-            <span>CANAL_VIVOS</span>
+            <span>PRAÇA</span>
           </button>
 
           {!isAlive && (
@@ -122,7 +122,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               >
                 <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500 mb-0.5 px-0.5">
                   <span>{msg.senderNickname}</span>
-                  {msg.isDeadChat && <span>[DEAD]</span>}
+                  {msg.isDeadChat && <span>[cemitério]</span>}
                 </div>
                 <div
                   className={`max-w-[88%] px-2.5 py-1.5 rounded text-xs leading-relaxed ${
