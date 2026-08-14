@@ -21,7 +21,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { GamePhase, PrivatePlayerSnapshot } from '../../engine/types.ts';
+import { GamePhase, PrivatePlayerSnapshot, VotingMode } from '../../engine/types.ts';
 import { ROLE_METADATA } from '../../engine/rules.ts';
 import { sound } from '../../services/soundEffects.ts';
 
@@ -72,7 +72,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const phase = snapshot?.room.phase;
-  const phaseInfo = phase ? PHASE_DISPLAY[phase] : null;
+  let phaseInfo = phase ? PHASE_DISPLAY[phase] : null;
+  if (
+    phaseInfo &&
+    phase === GamePhase.VOTING &&
+    snapshot?.room.config.votingMode === VotingMode.SEQUENTIAL
+  ) {
+    phaseInfo = { ...phaseInfo, label: 'Votação aberta' };
+  }
   const playerRoleMeta = snapshot?.player.role ? ROLE_METADATA[snapshot.player.role] : null;
   const inMatch = snapshot && phase !== GamePhase.LOBBY;
 

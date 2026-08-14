@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { GameEngine } from '../src/engine/gameEngine.ts';
 import { DEFAULT_ROOM_CONFIG, getRecommendedRoles } from '../src/engine/rules.ts';
-import { GamePhase, Role, VictoryWinner } from '../src/engine/types.ts';
+import { GamePhase, Role, VictoryWinner, VotingMode } from '../src/engine/types.ts';
 import { processBotActions } from '../server/botAI.ts';
 
 /** Reproduz as transições do RoomManager, um "tick" por chamada. */
@@ -42,6 +42,10 @@ function tick(engine: GameEngine): void {
       break;
     case GamePhase.VOTING:
     case GamePhase.RUNOFF:
+      if (engine.isSequentialVoting() && !engine.allVotesSubmitted()) {
+        engine.voteTurnTimeout();
+        if (!engine.allVotesSubmitted()) break;
+      }
       engine.resolveVoting();
       break;
     case GamePhase.MAYOR_TIEBREAK:
@@ -59,6 +63,8 @@ function runFullMatch(playerCount: number, matchIndex: number): GameEngine {
     minPlayers: 5,
     maxPlayers: 16,
     rolesCount: getRecommendedRoles(playerCount),
+    // Alterna os dois modos de votação entre as partidas simuladas
+    votingMode: matchIndex % 2 === 0 ? VotingMode.SECRET : VotingMode.SEQUENTIAL,
     // Fases curtas para a simulação terminar rápido
     nightDurationSeconds: 6,
     discussionDurationSeconds: 2,

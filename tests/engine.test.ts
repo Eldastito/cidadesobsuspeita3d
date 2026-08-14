@@ -12,6 +12,7 @@ import {
   Role,
   RoomConfig,
   VictoryWinner,
+  VotingMode,
   VotingOutcome,
 } from '../src/engine/types.ts';
 
@@ -345,6 +346,84 @@ describe('votação, empates e desempates (PRD 3.4)', () => {
     engine.mayorTiebreakTimeout();
     expect(engine.phase).toBe(GamePhase.RUNOFF);
     expect(engine.tieCandidateIds.sort()).toEqual(['p0', 'p1']);
+  });
+});
+
+describe('votação sequencial (modo do vídeo)', () => {
+  function makeSequentialMatch() {
+    // p0..p4 em assentos 0..4; p0 assassino
+    return makeFixedMatch(
+      [Role.ASSASSINO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO],
+      { config: { votingMode: VotingMode.SEQUENTIAL, enableMayorTiebreak: false } }
+    );
+  }
+
+  it('vota em ordem de assentos, um por vez, com voto público e definitivo', () => {
+    const engine = makeSequentialMatch();
+    engine.startVoting();
+
+    expect(engine.isSequentialVoting()).toBe(true);
+    expect(engine.currentVoterId).toBe('p0');
+
+    // Fora da vez é rejeitado
+    expect(engine.submitVote('p1', 'p0').accepted).toBe(false);
+
+    // p0 vota; o voto fica público no snapshot e a vez avança
+    expect(engine.submitVote('p0', 'p1').accepted).toBe(true);
+    expect(engine.currentVoterId).toBe('p1');
+    const snap = engine.getPrivateSnapshot('p2')!;
+    expect(snap.room.players.find(p => p.id === 'p0')!.votedTargetId).toBe('p1');
+    expect(snap.room.currentVoterId).toBe('p1');
+
+    // Voto declarado não pode ser mudado
+    expect(engine.submitVote('p0', 'p2').accepted).toBe(false);
+  });
+
+  it('timeout do turno vira abstenção pública e a fila termina na apuração', () => {
+    const engine = makeSequentialMatch();
+    engine.startVoting();
+
+    engine.submitVote('p0', 'p1');
+    engine.voteTurnTimeout(); // p1 dormiu no ponto
+    expect(engine.pendingVotes.get('p1')).toBeNull();
+    expect(engine.currentVoterId).toBe('p2');
+
+    engine.submitVote('p2', 'p0');
+    engine.submitVote('p3', 'p0');
+    engine.submitVote('p4', 'p0');
+    expect(engine.allVotesSubmitted()).toBe(true);
+
+    const summary = engine.resolveVoting();
+    expect(summary.outcome).toBe(VotingOutcome.ELIMINATED);
+    expect(summary.eliminatedPlayerId).toBe('p0');
+  });
+
+  it('segundo turno também é sequencial e restrito aos empatados', () => {
+    const engine = makeSequentialMatch();
+    engine.startVoting();
+    engine.submitVote('p0', 'p1');
+    engine.submitVote('p1', 'p0');
+    engine.submitVote('p2', 'p0');
+    engine.submitVote('p3', 'p1');
+    engine.voteTurnTimeout(); // p4 abstém
+
+    const summary = engine.resolveVoting();
+    expect(summary.outcome).toBe(VotingOutcome.TIE_RUNOFF);
+    expect(engine.phase).toBe(GamePhase.RUNOFF);
+    expect(engine.isSequentialVoting()).toBe(true);
+    expect(engine.currentVoterId).toBe('p0');
+
+    expect(engine.submitVote('p0', 'p2').accepted).toBe(false); // fora dos empatados
+    expect(engine.submitVote('p0', 'p1').accepted).toBe(true);
+  });
+
+  it('votos alheios continuam ocultos no modo secreto', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    engine.startVoting();
+    engine.submitVote('p0', 'p1');
+    const snap = engine.getPrivateSnapshot('p2')!;
+    expect(snap.room.players.find(p => p.id === 'p0')!.votedTargetId).toBeUndefined();
+    expect(snap.room.currentVoterId).toBeNull();
   });
 });
 

@@ -16,7 +16,12 @@ interface ConnectedClient {
   playerId: string;
   roomId: string;
   sessionId: string;
+  lastEmoteAt?: number;
 }
+
+/** Reações permitidas (lista fechada — nada de texto livre em sprite). */
+const ALLOWED_EMOTES = new Set(['👍', '👎', '😂', '😱', '🤔', '😡', '❤️', '🤫']);
+const EMOTE_COOLDOWN_MS = 1500;
 
 interface RoomRuntime {
   engine: GameEngine;
@@ -210,6 +215,19 @@ export class RoomManager {
           room.positions.set(client.playerId, [x * scale, z * scale, ry]);
           room.positionsDirty = true;
         });
+      case 'player.emote':
+        return this.withRoom(socket, (room, client) => {
+          const player = room.engine.players.get(client.playerId);
+          // Mortos não emitem reações visíveis aos vivos (PRD: canais isolados)
+          if (!player || !player.isAlive) return;
+          if (!ALLOWED_EMOTES.has(msg.payload.emoji)) return;
+
+          const now = Date.now();
+          if (client.lastEmoteAt && now - client.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
+          client.lastEmoteAt = now;
+
+          this.broadcastEmote(room.engine.roomId, client.playerId, msg.payload.emoji);
+        });
       case 'chat.send':
         return this.onChatSend(socket, msg.payload.text);
       case 'match.restart':
@@ -391,6 +409,16 @@ export class RoomManager {
 
       processBotActions(engine);
 
+      // Bots reagem de vez em quando no debate para a praça não ficar muda
+      if (engine.phase === GamePhase.DISCUSSION) {
+        const emotes = Array.from(ALLOWED_EMOTES);
+        for (const p of engine.players.values()) {
+          if (p.isBot && p.isAlive && Math.random() < 0.02) {
+            this.broadcastEmote(roomId, p.id, emotes[Math.floor(Math.random() * emotes.length)]);
+          }
+        }
+      }
+
       if (engine.phaseTimeRemaining > 0) {
         engine.phaseTimeRemaining -= 1;
       }
@@ -438,6 +466,12 @@ export class RoomManager {
 
       case GamePhase.VOTING:
       case GamePhase.RUNOFF:
+        // No modo sequencial, o estouro do tempo consome apenas o turno do
+        // votante da vez (abstenção pública) — a fase segue até a fila acabar.
+        if (engine.isSequentialVoting() && !engine.allVotesSubmitted()) {
+          engine.voteTurnTimeout();
+          if (!engine.allVotesSubmitted()) break;
+        }
         // O motor decide o próximo estado: DAY_RESOLUTION, RUNOFF ou MAYOR_TIEBREAK
         engine.resolveVoting();
         break;
@@ -587,6 +621,13 @@ export class RoomManager {
         this.roomByCode.delete(room.engine.roomCode);
         this.rooms.delete(roomId);
       }
+    }
+  }
+
+  private broadcastEmote(roomId: string, playerId: string, emoji: string): void {
+    const msg: ServerMessage = { type: 'player.emote.shown', payload: { playerId, emoji } };
+    for (const [socket, client] of this.clients.entries()) {
+      if (client.roomId === roomId) this.sendSocket(socket, msg);
     }
   }
 

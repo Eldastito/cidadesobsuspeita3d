@@ -4,7 +4,7 @@
  * sincronizamos props e desenhamos os controles de toque.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GamePhase, PublicPlayerView } from '../../engine/types.ts';
 import { MovementBus } from '../../services/gameClient.ts';
 import { VillageScene } from '../../three/villageScene.ts';
@@ -16,7 +16,11 @@ interface TownSquare3DProps {
   selectedTargetId: string | null;
   onSelectPlayer: (playerId: string) => void;
   movementBus: MovementBus;
+  /** Eliminado do julgamento atual (fase DAY_RESOLUTION) para a encenação. */
+  eliminatedPlayerId?: string | null;
 }
+
+const EMOTES = ['👍', '👎', '😂', '😱', '🤔', '😡', '❤️', '🤫'];
 
 const MOVEMENT_PHASES = new Set<GamePhase>([
   GamePhase.LOBBY,
@@ -36,11 +40,13 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
   selectedTargetId,
   onSelectPlayer,
   movementBus,
+  eliminatedPlayerId,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<VillageScene | null>(null);
   const joystickRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLDivElement | null>(null);
+  const [emoteCooldown, setEmoteCooldown] = useState(false);
 
   const onSelectRef = useRef(onSelectPlayer);
   onSelectRef.current = onSelectPlayer;
@@ -57,21 +63,27 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
     });
     sceneRef.current = scene;
 
-    const unsubscribe = movementBus.subscribePositions(positions => {
+    const unsubPositions = movementBus.subscribePositions(positions => {
       scene.applyRemotePositions(positions);
+    });
+    const unsubEmotes = movementBus.subscribeEmotes(({ playerId, emoji }) => {
+      scene.showEmote(playerId, emoji);
     });
 
     return () => {
-      unsubscribe();
+      unsubPositions();
+      unsubEmotes();
       scene.dispose();
       sceneRef.current = null;
     };
   }, [movementBus]);
 
-  // Sincroniza props → cena (diff interno, sem rebuild)
+  // Sincroniza props → cena (diff interno, sem rebuild).
+  // A fase (com o eliminado do julgamento) entra ANTES dos jogadores,
+  // para a encenação ser agendada antes do snapshot marcá-lo morto.
   useEffect(() => {
-    sceneRef.current?.setPhase(phase);
-  }, [phase]);
+    sceneRef.current?.setPhase(phase, eliminatedPlayerId);
+  }, [phase, eliminatedPlayerId]);
 
   useEffect(() => {
     sceneRef.current?.syncPlayers(players, localPlayerId, selectedTargetId);
@@ -143,10 +155,36 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
 
   const canMove = MOVEMENT_PHASES.has(phase);
   const isTouch = typeof window !== 'undefined' && 'ontouchstart' in window;
+  const localAlive = players.find(p => p.id === localPlayerId)?.isAlive ?? false;
+  const canEmote = localAlive && phase !== GamePhase.NIGHT_ACTIONS && phase !== GamePhase.NIGHT_RESOLUTION;
+
+  const handleEmote = (emoji: string) => {
+    if (emoteCooldown) return;
+    movementBus.sendEmote(emoji);
+    setEmoteCooldown(true);
+    setTimeout(() => setEmoteCooldown(false), 1500);
+  };
 
   return (
     <div className="relative w-full h-full min-h-[380px] overflow-hidden">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+
+      {/* Barra de reações (só vivos, fases diurnas) */}
+      {canEmote && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
+          {EMOTES.map(emoji => (
+            <button
+              key={emoji}
+              onClick={() => handleEmote(emoji)}
+              disabled={emoteCooldown}
+              aria-label={`Reagir com ${emoji}`}
+              className="text-base sm:text-lg leading-none p-1 rounded-full hover:bg-white/10 disabled:opacity-40 transition-all hover:scale-110"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Joystick virtual em telas de toque */}
       <div

@@ -58,13 +58,21 @@ export interface GameClientState {
   narratorCaption: NarratorCaption | null;
 }
 
-/** Canal imperativo de posições — consumido direto pela cena 3D. */
+export interface EmoteEvent {
+  playerId: string;
+  emoji: string;
+}
+
+/** Canal imperativo de posições e reações — consumido direto pela cena 3D. */
 export interface MovementBus {
   sendMove: (x: number, z: number, ry: number) => void;
   subscribePositions: (cb: (positions: PlayerPositionMap) => void) => () => void;
+  sendEmote: (emoji: string) => void;
+  subscribeEmotes: (cb: (event: EmoteEvent) => void) => () => void;
 }
 
 type PositionListener = (positions: PlayerPositionMap) => void;
+type EmoteListener = (event: EmoteEvent) => void;
 
 export function useGameClient() {
   const [state, setState] = useState<GameClientState>({
@@ -84,6 +92,7 @@ export function useGameClient() {
   const storedSessionRef = useRef<StoredSession | null>(null);
   const pendingIdentityRef = useRef<{ nickname: string; avatarId: string } | null>(null);
   const positionListenersRef = useRef<Set<PositionListener>>(new Set());
+  const emoteListenersRef = useRef<Set<EmoteListener>>(new Set());
 
   const send = (msg: ClientMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -158,6 +167,11 @@ export function useGameClient() {
 
       case 'player.positions': {
         positionListenersRef.current.forEach(cb => cb(msg.payload.positions));
+        break;
+      }
+
+      case 'player.emote.shown': {
+        emoteListenersRef.current.forEach(cb => cb(msg.payload));
         break;
       }
 
@@ -349,6 +363,11 @@ export function useGameClient() {
       subscribePositions: cb => {
         positionListenersRef.current.add(cb);
         return () => positionListenersRef.current.delete(cb);
+      },
+      sendEmote: emoji => send({ type: 'player.emote', payload: { emoji } }),
+      subscribeEmotes: cb => {
+        emoteListenersRef.current.add(cb);
+        return () => emoteListenersRef.current.delete(cb);
       },
     }),
     []

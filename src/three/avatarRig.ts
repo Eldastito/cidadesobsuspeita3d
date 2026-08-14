@@ -9,6 +9,7 @@ import {
   avatarColorFor,
   bodyMaterial,
   hatStyleFor,
+  makeEmojiSprite,
   makeNameSprite,
   makeSleepSprite,
   sharedGeometries as G,
@@ -59,6 +60,23 @@ export class AvatarRig {
   private idleSeed = Math.random() * Math.PI * 2;
   private walkAmount = 0; // 0 parado → 1 andando (suavizado)
   private deathProgress = -1; // -1 = sem animação; 0..1 animando queda
+
+  // Reação (balão de emoji)
+  private emoteSprite: THREE.Sprite | null = null;
+  private emoteT = 0;
+
+  // Gesto de apontar (voto declarado em voz alta)
+  private pointT = 0;
+  private pointTarget = new THREE.Vector3();
+
+  // Julgamento teatral: caminhar até o centro da praça antes de cair
+  private pendingTrial: { stagePos: { x: number; z: number }; seatPos: { x: number; z: number; ry: number } } | null =
+    null;
+  private trial: {
+    stage: 'walking' | 'dying';
+    stagePos: { x: number; z: number };
+    seatPos: { x: number; z: number; ry: number };
+  } | null = null;
 
   constructor(playerId: string, avatarId: string, seatNumber: number, initial: AvatarVisualState) {
     this.playerId = playerId;
@@ -177,6 +195,33 @@ export class AvatarRig {
     }
   }
 
+  /** Agenda o julgamento teatral: será usado quando a morte chegar no snapshot. */
+  public prepareTrial(stagePos: { x: number; z: number }, seatPos: { x: number; z: number; ry: number }): void {
+    if (!this.state.isAlive) return; // já morto — nada a encenar
+    this.pendingTrial = { stagePos, seatPos };
+  }
+
+  /** Mostra um balão de reação por alguns segundos. */
+  public showEmote(emoji: string): void {
+    if (this.emoteSprite) {
+      this.group.remove(this.emoteSprite);
+      this.emoteSprite.material.map?.dispose();
+      this.emoteSprite.material.dispose();
+    }
+    this.emoteSprite = makeEmojiSprite(emoji, { bubble: true });
+    this.emoteSprite.position.set(0, this.state.isAlive ? 2.95 : 2.1, 0);
+    this.emoteSprite.scale.set(0.1, 0.1, 1);
+    this.group.add(this.emoteSprite);
+    this.emoteT = 3;
+  }
+
+  /** Aponta dramaticamente para uma posição (voto declarado). */
+  public pointAt(target: THREE.Vector3, durationSeconds = 2.6): void {
+    if (!this.state.isAlive) return;
+    this.pointTarget.copy(target);
+    this.pointT = durationSeconds;
+  }
+
   /** Aplica mudanças de estado vindas do snapshot (diff, sem rebuild). */
   public refreshVisualState(next: AvatarVisualState, force = false): void {
     const prev = this.state;
@@ -184,7 +229,17 @@ export class AvatarRig {
     this.state = { ...next };
 
     if (justDied && !force) {
-      this.deathProgress = 0; // dispara animação de queda
+      if (this.pendingTrial) {
+        // Julgamento: caminha até o centro da praça, cai por lá,
+        // e a lápide aparece de volta no assento.
+        const { stagePos, seatPos } = this.pendingTrial;
+        this.pendingTrial = null;
+        this.trial = { stage: 'walking', stagePos, seatPos };
+        this.targetPosition.set(stagePos.x, 0, stagePos.z);
+        this.targetRotationY = Math.atan2(seatPos.x - stagePos.x, seatPos.z - stagePos.z);
+      } else {
+        this.deathProgress = 0; // queda no lugar (morte noturna)
+      }
     }
 
     // Placa de nome (recriada só quando o conteúdo muda)
@@ -219,11 +274,13 @@ export class AvatarRig {
     this.selectionRing.visible = next.isSelected || next.isLocal;
     this.selectionRing.material = next.isSelected ? M.selectionRing : M.localRing;
 
-    // Morte imediata (spawn já morto / força)
-    if (!next.isAlive && (force || this.deathProgress < 0)) {
+    // Morte imediata (spawn já morto / força) — exceto durante o julgamento teatral
+    if (!next.isAlive && (force || this.deathProgress < 0) && !this.trial) {
       this.showDeadForm(true);
     }
     if (next.isAlive) {
+      this.trial = null;
+      this.pendingTrial = null;
       this.showDeadForm(false);
     }
 
@@ -311,6 +368,43 @@ export class AvatarRig {
     const moving = dist > WALK_EPSILON ? 1 : 0;
     this.walkAmount += (moving - this.walkAmount) * Math.min(1, dt * 6);
 
+    // Balão de reação: pop de entrada e fade de saída
+    if (this.emoteSprite) {
+      this.emoteT -= dt;
+      const mat = this.emoteSprite.material as THREE.SpriteMaterial;
+      if (this.emoteT <= 0) {
+        this.group.remove(this.emoteSprite);
+        mat.map?.dispose();
+        mat.dispose();
+        this.emoteSprite = null;
+      } else {
+        const scaleIn = Math.min(1, (3 - this.emoteT) * 5);
+        this.emoteSprite.scale.set(0.85 * scaleIn, 0.85 * scaleIn, 1);
+        mat.opacity = this.emoteT < 0.5 ? this.emoteT * 2 : 1;
+        this.emoteSprite.position.y = (this.state.isAlive ? 2.95 : 2.1) + Math.sin(elapsed * 2.5) * 0.05;
+      }
+    }
+
+    // Julgamento: caminhada "morta-viva" até o palco central
+    if (this.trial?.stage === 'walking') {
+      this.walkPhase += dt * 8;
+      const swing = Math.sin(this.walkPhase) * 0.55;
+      this.legL.rotation.x = swing;
+      this.legR.rotation.x = -swing;
+      this.armL.rotation.x = -swing * 0.6;
+      this.armR.rotation.x = swing * 0.6;
+      this.head.rotation.x = 0.22; // cabeça baixa, condenado
+      const dStage = Math.hypot(
+        this.trial.stagePos.x - pos.x,
+        this.trial.stagePos.z - pos.z
+      );
+      if (dStage < 0.3) {
+        this.trial.stage = 'dying';
+        this.deathProgress = 0;
+      }
+      return;
+    }
+
     // Animação de morte: queda para trás + afundar, depois lápide
     if (this.deathProgress >= 0 && this.deathProgress < 1) {
       this.deathProgress = Math.min(1, this.deathProgress + dt / 1.4);
@@ -318,7 +412,15 @@ export class AvatarRig {
       this.body.rotation.x = -t * Math.PI * 0.5;
       this.body.position.y = -t * 0.25;
       if (this.deathProgress >= 1) {
-        this.showDeadForm(true);
+        if (this.trial) {
+          // A lápide fica no assento, não no palco
+          const seat = this.trial.seatPos;
+          this.trial = null;
+          this.showDeadForm(true);
+          this.snapTo(seat.x, seat.z, seat.ry);
+        } else {
+          this.showDeadForm(true);
+        }
       }
       return;
     }
@@ -356,8 +458,17 @@ export class AvatarRig {
     this.legR.rotation.x = -swing;
     this.armL.rotation.x = -swing * 0.8;
 
-    // Braço direito: levantado quando pede a palavra
-    if (this.state.hasRaisedHand) {
+    // Braço direito: apontar acusa, mão levantada pede a palavra
+    if (this.pointT > 0) {
+      this.pointT -= dt;
+      const dx = this.pointTarget.x - this.group.position.x;
+      const dz = this.pointTarget.z - this.group.position.z;
+      if (Math.hypot(dx, dz) > 0.01) {
+        this.targetRotationY = Math.atan2(dx, dz);
+      }
+      this.armR.rotation.x += (-Math.PI * 0.52 - this.armR.rotation.x) * Math.min(1, dt * 10);
+      this.armR.rotation.z = 0;
+    } else if (this.state.hasRaisedHand) {
       this.armR.rotation.x += (-Math.PI * 0.92 - this.armR.rotation.x) * Math.min(1, dt * 8);
       this.armR.rotation.z = Math.sin(elapsed * 6) * 0.08;
     } else {
@@ -399,6 +510,10 @@ export class AvatarRig {
     if (this.sleepSprite) {
       this.sleepSprite.material.map?.dispose();
       this.sleepSprite.material.dispose();
+    }
+    if (this.emoteSprite) {
+      this.emoteSprite.material.map?.dispose();
+      this.emoteSprite.material.dispose();
     }
     // Geometrias/materiais são compartilhados — não descartar aqui.
   }

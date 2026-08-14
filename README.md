@@ -78,6 +78,6 @@ Durante a **noite**, todos os avatares voltam a seus assentos e dormem — o mov
 
 ## Estado atual vs. PRD
 
-Implementado: motor determinístico com todos os papéis, votação secreta com segundo turno e voto de minerva do Prefeito, chat com canal isolado de mortos, caderno do Detetive, palpites do Cidadão, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
+Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
 
-Fora do escopo desta versão (roadmap do PRD): voz WebRTC, salas públicas/matchmaking, contas persistentes, PostgreSQL/Redis (estado é em memória por processo), observabilidade completa e votação sequencial como no vídeo original.
+Fora do escopo desta versão (roadmap do PRD): voz WebRTC, salas públicas/matchmaking, contas persistentes, PostgreSQL/Redis (estado é em memória por processo) e observabilidade completa.

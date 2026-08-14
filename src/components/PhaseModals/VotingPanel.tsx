@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { Check, Crown, Gavel, UserX, Vote } from 'lucide-react';
-import { GamePhase, PrivatePlayerSnapshot } from '../../engine/types.ts';
+import { Check, Crown, Gavel, Megaphone, UserX, Vote } from 'lucide-react';
+import { GamePhase, PrivatePlayerSnapshot, VotingMode } from '../../engine/types.ts';
 import { ROLE_METADATA } from '../../engine/rules.ts';
 
 interface VotingPanelProps {
@@ -117,7 +117,112 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({
     );
   }
 
-  // ── Votação normal / segundo turno ───────────────────────────────────────
+  // ── Votação aberta em sequência (modo do vídeo) ──────────────────────────
+  const isSequential = room.config.votingMode === VotingMode.SEQUENTIAL;
+  if (isSequential) {
+    const currentVoter = room.players.find(p => p.id === room.currentVoterId);
+    const isMyTurn = room.currentVoterId === player.id;
+    const aliveInOrder = [...room.players]
+      .filter(p => p.isAlive)
+      .sort((a, b) => a.seatNumber - b.seatNumber);
+    const eligibleSeq =
+      selectedTarget &&
+      selectedTarget.isAlive &&
+      (!isRunoff || room.tieCandidateIds.includes(selectedTarget.id));
+
+    return (
+      <div className="bg-ink-900 border border-rose-500/30 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
+        <div className="flex items-center justify-between border-b border-white/5 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400">
+              <Megaphone className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400 block">
+                {isRunoff ? 'Segundo turno — voto aberto' : 'Votação aberta na praça'}
+              </span>
+              <h4 className="text-xs font-bold text-white">
+                {isMyTurn
+                  ? 'Sua vez! Declare seu voto em voz alta'
+                  : currentVoter
+                  ? `Vez de ${currentVoter.nickname} declarar o voto`
+                  : 'Apurando os votos…'}
+              </h4>
+            </div>
+          </div>
+          {player.hasVoted && (
+            <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+              <Check className="w-3 h-3" />
+              Voto declarado
+            </span>
+          )}
+        </div>
+
+        {/* Fila de votação com votos já declarados (públicos) */}
+        <div className="flex flex-wrap gap-1.5">
+          {aliveInOrder.map(p => {
+            const voted = p.votedTargetId !== undefined && room.players.some(v => v.id === p.id && v.votedTargetId !== undefined);
+            const targetName = p.votedTargetId
+              ? room.players.find(t => t.id === p.votedTargetId)?.nickname
+              : null;
+            const isCurrent = p.id === room.currentVoterId;
+            return (
+              <span
+                key={p.id}
+                className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 ${
+                  isCurrent
+                    ? 'bg-lantern-400/15 border-lantern-400/50 text-lantern-300 animate-pulse'
+                    : targetName
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    : p.votedTargetId === null && voted
+                    ? 'bg-white/5 border-white/10 text-slate-500'
+                    : 'bg-ink-950/60 border-white/5 text-slate-400'
+                }`}
+              >
+                {p.nickname}
+                {isCurrent && ' 🗣️'}
+                {targetName && <span className="opacity-80">→ {targetName}</span>}
+                {!targetName && p.votedTargetId === null && <span className="opacity-60">(absteve)</span>}
+              </span>
+            );
+          })}
+        </div>
+
+        {isMyTurn ? (
+          <div className="p-2.5 bg-ink-950/70 border border-lantern-400/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 text-xs w-full sm:w-auto">
+              <span className="text-slate-500 text-[10px] uppercase">Acusar:</span>
+              <span className="font-bold text-lantern-300">
+                {selectedTarget ? selectedTarget.nickname : 'toque em alguém na praça'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => onSubmitVote(selectedTargetId)}
+                disabled={!eligibleSeq}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+              >
+                <UserX className="w-3.5 h-3.5" />
+                Declarar voto
+              </button>
+              <button
+                onClick={() => onSubmitVote(null)}
+                className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold transition-colors"
+              >
+                Abster-se
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[10px] text-slate-500">
+            Votos declarados são públicos e definitivos, na ordem dos assentos — como na roda original.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // ── Votação secreta / segundo turno ──────────────────────────────────────
   const eligibleForRunoff =
     !isRunoff || (selectedTarget && room.tieCandidateIds.includes(selectedTarget.id));
   const canVote = selectedTarget && selectedTarget.isAlive && eligibleForRunoff;

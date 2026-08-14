@@ -84,9 +84,12 @@ export const RuleSummaryModal: React.FC<RuleSummaryModalProps> = ({ isOpen, onCl
               cenário. Mortos falam apenas no cemitério.
             </li>
             <li>
-              <strong>Votação:</strong> secreta e simultânea; o resultado só aparece na apuração.
-              Empate → o <strong>Prefeito</strong> dá o voto de minerva (se houver); senão, há{' '}
-              <strong>segundo turno</strong> entre os empatados; persistindo o empate, ninguém sai.
+              <strong>Votação:</strong> no modo padrão é secreta e simultânea — o resultado só
+              aparece na apuração. No modo <strong>aberto em sequência</strong> (como na roda
+              original), cada morador declara o voto em voz alta na ordem dos assentos, e o voto é
+              público e definitivo. Empate → o <strong>Prefeito</strong> dá o voto de minerva (se
+              houver); senão, há <strong>segundo turno</strong> entre os empatados; persistindo o
+              empate, ninguém sai.
             </li>
             <li>
               <strong>Vitória:</strong> a Cidade vence eliminando todos os assassinos; os Assassinos

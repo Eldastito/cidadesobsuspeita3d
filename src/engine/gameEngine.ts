@@ -18,6 +18,7 @@ import {
   RoomConfig,
   TimelineEvent,
   VictoryWinner,
+  VotingMode,
   VotingOutcome,
   VotingSummary,
 } from './types.ts';
@@ -43,6 +44,10 @@ export class GameEngine {
   public pendingNightActions: Map<string, NightSubmission> = new Map();
   public pendingVotes: Map<string, string | null> = new Map();
   public tieCandidateIds: string[] = [];
+
+  // Votação sequencial (ordem de assentos)
+  public voteOrder: string[] = [];
+  public currentVoterIndex: number = -1;
 
   private now: () => number;
   private eventSeq = 0;
@@ -523,12 +528,69 @@ export class GameEngine {
     if (p && p.isAlive) p.hasRaisedHand = !p.hasRaisedHand;
   }
 
+  /** Votação aberta em ordem de assentos está ativa nesta fase? */
+  public isSequentialVoting(): boolean {
+    return (
+      this.config.votingMode === VotingMode.SEQUENTIAL &&
+      (this.phase === GamePhase.VOTING || this.phase === GamePhase.RUNOFF)
+    );
+  }
+
+  public get currentVoterId(): string | null {
+    if (!this.isSequentialVoting()) return null;
+    return this.voteOrder[this.currentVoterIndex] ?? null;
+  }
+
+  /** Monta a fila de votantes vivos por assento e abre o primeiro turno. */
+  private setupSequentialVoting(): void {
+    this.voteOrder = Array.from(this.players.values())
+      .filter(p => p.isAlive)
+      .sort((a, b) => a.seatNumber - b.seatNumber)
+      .map(p => p.id);
+    this.currentVoterIndex = 0;
+    this.setTimer(PHASE_DURATIONS.sequentialVoteTurn);
+  }
+
+  /** Avança para o próximo votante sem voto registrado. */
+  private advanceVoteTurn(): void {
+    while (this.currentVoterIndex < this.voteOrder.length) {
+      this.currentVoterIndex += 1;
+      const nextId = this.voteOrder[this.currentVoterIndex];
+      if (nextId && !this.pendingVotes.has(nextId)) {
+        this.setTimer(PHASE_DURATIONS.sequentialVoteTurn);
+        return;
+      }
+    }
+  }
+
+  /** Votante da vez estourou o tempo → abstenção pública e próximo turno. */
+  public voteTurnTimeout(): void {
+    if (!this.isSequentialVoting()) return;
+    const voterId = this.currentVoterId;
+    if (voterId && !this.pendingVotes.has(voterId)) {
+      const voter = this.players.get(voterId);
+      if (voter) voter.votedTargetId = null;
+      this.pendingVotes.set(voterId, null);
+    }
+    this.advanceVoteTurn();
+  }
+
   public startVoting(): void {
     this.phase = GamePhase.VOTING;
-    this.setTimer(this.config.votingDurationSeconds);
     this.tieCandidateIds = [];
     this.clearVotes();
 
+    if (this.config.votingMode === VotingMode.SEQUENTIAL) {
+      this.setupSequentialVoting();
+      this.addTimelineEvent(
+        'VOTING_START',
+        `Votação do dia ${this.roundNumber}`,
+        'A votação aberta começou: cada morador declara seu voto em voz alta, na ordem da praça.'
+      );
+      return;
+    }
+
+    this.setTimer(this.config.votingDurationSeconds);
     this.addTimelineEvent(
       'VOTING_START',
       `Votação do dia ${this.roundNumber}`,
@@ -539,8 +601,12 @@ export class GameEngine {
   public startRunoff(tiedIds: string[]): void {
     this.phase = GamePhase.RUNOFF;
     this.tieCandidateIds = [...tiedIds];
-    this.setTimer(PHASE_DURATIONS.runoff);
     this.clearVotes();
+    if (this.config.votingMode === VotingMode.SEQUENTIAL) {
+      this.setupSequentialVoting();
+    } else {
+      this.setTimer(PHASE_DURATIONS.runoff);
+    }
 
     const names = tiedIds
       .map(id => this.players.get(id)?.nickname)
@@ -581,6 +647,16 @@ export class GameEngine {
       return { accepted: false, message: 'Apenas jogadores vivos podem votar.' };
     }
 
+    const sequential = this.isSequentialVoting();
+    if (sequential) {
+      if (this.currentVoterId !== voterId) {
+        return { accepted: false, message: 'Aguarde a sua vez de declarar o voto.' };
+      }
+      if (this.pendingVotes.has(voterId)) {
+        return { accepted: false, message: 'Voto declarado em voz alta não pode ser mudado.' };
+      }
+    }
+
     if (targetId) {
       const target = this.players.get(targetId);
       if (!target || !target.isAlive) {
@@ -593,6 +669,9 @@ export class GameEngine {
 
     voter.votedTargetId = targetId;
     this.pendingVotes.set(voterId, targetId);
+    if (sequential) {
+      this.advanceVoteTurn();
+    }
     return { accepted: true };
   }
 
@@ -878,7 +957,9 @@ export class GameEngine {
           ? p.role
           : undefined,
         votedTargetId:
-          this.phase === GamePhase.DAY_RESOLUTION || isFinished ? p.votedTargetId : undefined,
+          this.phase === GamePhase.DAY_RESOLUTION || isFinished || this.isSequentialVoting()
+            ? p.votedTargetId
+            : undefined,
       }));
 
     let fellowAssassinIds: string[] | undefined;
@@ -933,6 +1014,7 @@ export class GameEngine {
           this.phase === GamePhase.RUNOFF || this.phase === GamePhase.MAYOR_TIEBREAK
             ? this.tieCandidateIds
             : [],
+        currentVoterId: this.currentVoterId,
         timeline: this.timeline.map(t => ({
           ...t,
           secretPayload: isFinished ? t.secretPayload : undefined,

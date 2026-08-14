@@ -108,6 +108,14 @@ export interface Player {
   deathReason?: DeathReason;
 }
 
+/** Modo de votação diurna (PRD 6.7). */
+export enum VotingMode {
+  /** Padrão: todos votam ao mesmo tempo, em segredo; resultado só na apuração. */
+  SECRET = 'SECRET',
+  /** Como no vídeo original: em ordem de assentos, um por vez, voto público e definitivo. */
+  SEQUENTIAL = 'SEQUENTIAL',
+}
+
 export interface RoomConfig {
   minPlayers: number;
   maxPlayers: number;
@@ -121,6 +129,7 @@ export interface RoomConfig {
   nightDurationSeconds: number;
   discussionDurationSeconds: number;
   votingDurationSeconds: number;
+  votingMode: VotingMode;
   revealRoleOnDeath: boolean;
   enableMayorTiebreak: boolean;
 }
@@ -131,7 +140,9 @@ export const PHASE_DURATIONS = {
   dawn: 8,
   runoff: 25,
   mayorTiebreak: 20,
-  dayResolution: 6,
+  dayResolution: 8,
+  /** Janela de cada votante no modo sequencial. */
+  sequentialVoteTurn: 15,
 } as const;
 
 export interface NightSubmission {
@@ -265,6 +276,8 @@ export interface PrivatePlayerSnapshot {
     lastVotingSummary: VotingSummary | null;
     /** Candidatos do desempate, público durante RUNOFF/MAYOR_TIEBREAK. */
     tieCandidateIds: string[];
+    /** Votante da vez no modo sequencial (null fora dele). */
+    currentVoterId: string | null;
     timeline: TimelineEvent[];
     allRolesRevealed?: Record<string, Role>; // apenas em FINISHED
   };
