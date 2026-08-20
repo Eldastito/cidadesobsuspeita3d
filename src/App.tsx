@@ -33,11 +33,13 @@ export default function App() {
     viewMode,
     narratorCaption,
     profileData,
+    shopNotice,
     movementBus,
     voiceBus,
     createRoom,
     joinRoom,
     leaveRoom,
+    buyShopItem,
     updateConfig,
     setReady,
     startMatch,
@@ -135,6 +137,8 @@ export default function App() {
             onSelectPlayer={setSelectedTargetId}
             speakingIds={voice.speakingIds}
             profileData={profileData}
+            shopNotice={shopNotice}
+            onBuyShopItem={buyShopItem}
             voiceBar={
               snapshot ? (
                 <VoiceBar
@@ -163,6 +167,7 @@ export default function App() {
                     movementBus={movementBus}
                     eliminatedPlayerId={eliminatedPlayerId}
                     speakingIds={voice.speakingIds}
+                    plazaTheme={snapshot.room.config.plazaTheme}
                   />
                 ) : (
                   <TownSquare2D

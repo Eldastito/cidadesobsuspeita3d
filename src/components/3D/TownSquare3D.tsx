@@ -20,6 +20,8 @@ interface TownSquare3DProps {
   eliminatedPlayerId?: string | null;
   /** Quem está falando na voz agora (indicador 🔊). */
   speakingIds?: ReadonlySet<string>;
+  /** Tema cosmético da praça (skin do jogo). */
+  plazaTheme?: string;
 }
 
 const EMOTES = ['👍', '👎', '😂', '😱', '🤔', '😡', '❤️', '🤫'];
@@ -44,12 +46,14 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
   movementBus,
   eliminatedPlayerId,
   speakingIds,
+  plazaTheme,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<VillageScene | null>(null);
   const joystickRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLDivElement | null>(null);
   const [emoteCooldown, setEmoteCooldown] = useState(false);
+  const [sitHint, setSitHint] = useState({ near: false, sitting: false });
 
   const onSelectRef = useRef(onSelectPlayer);
   onSelectRef.current = onSelectPlayer;
@@ -61,10 +65,13 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
 
     const scene = new VillageScene(container, {
       onSelectPlayer: id => onSelectRef.current(id),
-      onLocalMove: (x, z, ry) => movementBus.sendMove(x, z, ry),
+      onLocalMove: (x, z, ry, pose) => movementBus.sendMove(x, z, ry, pose),
+      onSitHintChange: (near, sitting) => setSitHint({ near, sitting }),
       quality: 'auto',
     });
     sceneRef.current = scene;
+    // Gancho de diagnóstico para testes E2E
+    (window as unknown as { __villageScene?: VillageScene }).__villageScene = scene;
 
     const unsubPositions = movementBus.subscribePositions(positions => {
       scene.applyRemotePositions(positions);
@@ -95,6 +102,10 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
   useEffect(() => {
     if (speakingIds) sceneRef.current?.setSpeakingIds(speakingIds);
   }, [speakingIds]);
+
+  useEffect(() => {
+    sceneRef.current?.setTheme(plazaTheme || 'padrao');
+  }, [plazaTheme]);
 
   // Joystick virtual (toque)
   useEffect(() => {
@@ -207,10 +218,37 @@ export const TownSquare3D: React.FC<TownSquare3DProps> = ({
         />
       </div>
 
+      {/* Botões de movimento (pular / sentar) */}
+      {canMove && (
+        <div className="absolute bottom-5 right-3 flex flex-col gap-2">
+          {(sitHint.near || sitHint.sitting) && (
+            <button
+              onClick={() => sceneRef.current?.toggleSit()}
+              className="px-3 py-2 rounded-xl bg-lantern-400/90 hover:bg-lantern-300 text-ink-950 text-xs font-bold shadow-lg backdrop-blur transition-colors"
+            >
+              {sitHint.sitting ? '🧍 Levantar' : '🪑 Sentar'}
+              {!isTouch && <span className="opacity-60 font-normal"> (E)</span>}
+            </button>
+          )}
+          {isTouch && !sitHint.sitting && (
+            <button
+              onClick={() => sceneRef.current?.requestJump()}
+              aria-label="Pular"
+              className="w-12 h-12 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-xl backdrop-blur shadow-lg transition-colors"
+            >
+              ⬆️
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Dica de controles */}
-      <div className="absolute bottom-3 right-3 bg-black/45 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[11px] text-slate-300 pointer-events-none flex items-center gap-2">
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-20 bg-black/45 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[11px] text-slate-300 pointer-events-none flex items-center gap-2 max-w-[92%]">
         {canMove ? (
-          <span>{isTouch ? '🕹️ Joystick para andar' : '⌨️ WASD/setas para andar'} • arraste para girar • clique para selecionar</span>
+          <span>
+            {isTouch ? '🕹️ Joystick para andar' : '⌨️ WASD anda • espaço pula'} • arraste para girar •
+            clique para selecionar
+          </span>
         ) : (
           <span>🌙 A cidade dorme — todos voltam aos seus lugares</span>
         )}

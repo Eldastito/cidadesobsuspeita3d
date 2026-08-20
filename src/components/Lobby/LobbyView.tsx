@@ -26,8 +26,11 @@ import {
   MovementBus,
   ProfileData,
   setStoredAvatarColor,
+  ShopNotice,
 } from '../../services/gameClient.ts';
 import { AVATAR_COLORS } from '../../three/sceneAssets.ts';
+import { PLAZA_THEMES } from '../../engine/skins.ts';
+import { ShopPanel } from '../Shop/ShopPanel.tsx';
 
 const colorHex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 import { TownSquare3D } from '../3D/TownSquare3D.tsx';
@@ -53,6 +56,9 @@ interface LobbyViewProps {
   voiceBar?: React.ReactNode;
   /** Estatísticas persistentes deste navegador + últimas partidas da vila. */
   profileData?: ProfileData | null;
+  /** Resultado da última compra na loja. */
+  shopNotice?: ShopNotice | null;
+  onBuyShopItem?: (itemId: string) => void;
 }
 
 const AVATAR_OPTIONS = [
@@ -86,6 +92,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   speakingIds,
   voiceBar,
   profileData,
+  shopNotice,
+  onBuyShopItem,
 }) => {
   const [nickname, setNickname] = useState(
     () => NICKNAME_SUGGESTIONS[Math.floor(Math.random() * NICKNAME_SUGGESTIONS.length)]
@@ -276,6 +284,37 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             </div>
           )}
 
+          {/* Loja da vila (Kokolas ganhas jogando) */}
+          {onBuyShopItem && (
+            <ShopPanel profileData={profileData ?? null} shopNotice={shopNotice ?? null} onBuy={onBuyShopItem} />
+          )}
+
+          {/* Ranking da vila */}
+          {(profileData?.leaderboard?.length ?? 0) > 0 && (
+            <div className="bg-ink-900/60 border border-white/5 rounded-2xl p-3 space-y-1.5 backdrop-blur">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+                🏆 Ranking da vila
+              </span>
+              {profileData!.leaderboard.slice(0, 5).map((row, i) => (
+                <div key={i} className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-2 text-slate-300">
+                    <span
+                      className={`w-5 text-center font-bold ${
+                        i === 0 ? 'text-lantern-300' : i === 1 ? 'text-slate-300' : i === 2 ? 'text-amber-600' : 'text-slate-600'
+                      }`}
+                    >
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`}
+                    </span>
+                    <span className="font-semibold truncate">{row.nickname}</span>
+                  </span>
+                  <span className="text-slate-500">
+                    <span className="text-emerald-400 font-bold">{row.wins}</span> vitórias · {row.matchesPlayed} partidas
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Últimas partidas da vila (histórico global) */}
           {(profileData?.recentMatches?.length ?? 0) > 0 && (
             <div className="bg-ink-900/60 border border-white/5 rounded-2xl p-3 space-y-1.5 backdrop-blur">
@@ -421,6 +460,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               onSelectPlayer={onSelectPlayer}
               movementBus={movementBus}
               speakingIds={speakingIds}
+              plazaTheme={config.plazaTheme}
             />
           ) : (
             <TownSquare2D
@@ -639,6 +679,29 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               >
                 <option value={VotingMode.SECRET}>Secreta simultânea</option>
                 <option value={VotingMode.SEQUENTIAL}>Aberta em sequência (clássica)</option>
+              </select>
+            </label>
+            <label className="flex items-center justify-between p-2 rounded-lg bg-ink-950/60 border border-white/5">
+              <span className="text-slate-300">
+                Tema da praça
+                <span className="block text-[10px] text-slate-500">Temas pagos: compre na Loja da Vila</span>
+              </span>
+              <select
+                value={config.plazaTheme}
+                disabled={!isHost}
+                onChange={e => onUpdateConfig({ plazaTheme: e.target.value })}
+                className="bg-ink-950 border border-white/10 rounded px-2 py-1 text-slate-200"
+              >
+                {PLAZA_THEMES.map(theme => {
+                  const ownedTheme =
+                    theme.price === 0 || (profileData?.profile?.ownedSkins ?? []).includes(theme.id);
+                  return (
+                    <option key={theme.id} value={theme.id} disabled={!ownedTheme}>
+                      {theme.name}
+                      {!ownedTheme ? ` — 🪙${theme.price}` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </label>
           </div>

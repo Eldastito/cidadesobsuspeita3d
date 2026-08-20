@@ -41,6 +41,16 @@ export interface GuestProfile {
   wins: number;
   /** por papel: { ASSASSINO: { played, wins }, ... } */
   roleStats: Partial<Record<Role, { played: number; wins: number }>>;
+  /** Moeda cosmética ganha jogando (nunca com dinheiro real). */
+  kokolas: number;
+  /** Ids de skins/temas comprados. */
+  ownedSkins: string[];
+}
+
+export interface LeaderboardEntry {
+  nickname: string;
+  wins: number;
+  matchesPlayed: number;
 }
 
 export class Persistence {
@@ -83,6 +93,17 @@ export class Persistence {
       );
       CREATE INDEX IF NOT EXISTS idx_matches_finished ON matches (finished_at DESC);
     `);
+
+    // Migração aditiva: economia Kokola (colunas novas em bancos antigos)
+    const columns = (this.db.prepare(`PRAGMA table_info(profiles)`).all() as Array<Record<string, unknown>>).map(
+      c => String(c.name)
+    );
+    if (!columns.includes('kokolas')) {
+      this.db.exec(`ALTER TABLE profiles ADD COLUMN kokolas INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!columns.includes('owned_skins_json')) {
+      this.db.exec(`ALTER TABLE profiles ADD COLUMN owned_skins_json TEXT NOT NULL DEFAULT '[]'`);
+    }
   }
 
   // ── Salas ────────────────────────────────────────────────────────────────
@@ -178,14 +199,22 @@ export class Persistence {
 
   public getProfile(guestId: string): GuestProfile | null {
     const row = this.db
-      .prepare('SELECT nickname, matches_played, wins, role_stats_json FROM profiles WHERE guest_id = ?')
+      .prepare(
+        'SELECT nickname, matches_played, wins, role_stats_json, kokolas, owned_skins_json FROM profiles WHERE guest_id = ?'
+      )
       .get(guestId) as Record<string, unknown> | undefined;
     if (!row) return null;
     let roleStats: GuestProfile['roleStats'] = {};
+    let ownedSkins: string[] = [];
     try {
       roleStats = JSON.parse(String(row.role_stats_json));
     } catch {
       roleStats = {};
+    }
+    try {
+      ownedSkins = JSON.parse(String(row.owned_skins_json));
+    } catch {
+      ownedSkins = [];
     }
     return {
       guestId,
@@ -193,7 +222,80 @@ export class Persistence {
       matchesPlayed: Number(row.matches_played),
       wins: Number(row.wins),
       roleStats,
+      kokolas: Number(row.kokolas ?? 0),
+      ownedSkins,
     };
+  }
+
+  // ── Economia Kokola (cosmética, ganha jogando) ───────────────────────────
+
+  /** Credita Kokolas — cria o perfil se ainda não existir. */
+  public awardKokolas(guestId: string, nickname: string, amount: number): void {
+    if (amount <= 0) return;
+    this.db
+      .prepare(
+        `INSERT INTO profiles (guest_id, nickname, matches_played, wins, role_stats_json, kokolas, updated_at)
+         VALUES (?, ?, 0, 0, '{}', ?, ?)
+         ON CONFLICT(guest_id) DO UPDATE SET
+           kokolas = profiles.kokolas + ?,
+           updated_at = excluded.updated_at`
+      )
+      .run(guestId, nickname, amount, Date.now(), amount);
+  }
+
+  /**
+   * Compra atômica: debita o preço e adiciona o item, apenas se o saldo
+   * bastar e o item ainda não for possuído. Retorna o resultado.
+   */
+  public buySkin(
+    guestId: string,
+    itemId: string,
+    price: number
+  ): { ok: boolean; reason?: string; kokolas: number; ownedSkins: string[] } {
+    const profile = this.getProfile(guestId);
+    if (!profile) {
+      return { ok: false, reason: 'Jogue uma partida antes de visitar a loja.', kokolas: 0, ownedSkins: [] };
+    }
+    if (profile.ownedSkins.includes(itemId)) {
+      return { ok: false, reason: 'Você já possui este item.', kokolas: profile.kokolas, ownedSkins: profile.ownedSkins };
+    }
+    if (profile.kokolas < price) {
+      return {
+        ok: false,
+        reason: `Kokolas insuficientes (faltam ${price - profile.kokolas}). Jogue partidas para ganhar mais!`,
+        kokolas: profile.kokolas,
+        ownedSkins: profile.ownedSkins,
+      };
+    }
+
+    const newOwned = [...profile.ownedSkins, itemId];
+    // Débito condicionado ao saldo no próprio UPDATE (atômico no SQLite)
+    const result = this.db
+      .prepare(
+        `UPDATE profiles SET kokolas = kokolas - ?, owned_skins_json = ?, updated_at = ?
+         WHERE guest_id = ? AND kokolas >= ?`
+      )
+      .run(price, JSON.stringify(newOwned), Date.now(), guestId, price);
+    if (Number(result.changes) === 0) {
+      return { ok: false, reason: 'Saldo mudou durante a compra — tente de novo.', kokolas: profile.kokolas, ownedSkins: profile.ownedSkins };
+    }
+    return { ok: true, kokolas: profile.kokolas - price, ownedSkins: newOwned };
+  }
+
+  /** Ranking da vila: mais vitórias primeiro; desempate por menos partidas. */
+  public leaderboard(limit: number = 10): LeaderboardEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT nickname, wins, matches_played FROM profiles
+         WHERE matches_played > 0
+         ORDER BY wins DESC, matches_played ASC, updated_at DESC LIMIT ?`
+      )
+      .all(limit) as Array<Record<string, unknown>>;
+    return rows.map(r => ({
+      nickname: String(r.nickname),
+      wins: Number(r.wins),
+      matchesPlayed: Number(r.matches_played),
+    }));
   }
 
   public close(): void {

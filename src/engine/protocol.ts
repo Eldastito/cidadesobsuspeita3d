@@ -12,8 +12,15 @@ import {
 
 export const PROTOCOL_VERSION = '2.0.0';
 
-/** Posição cosmética de um avatar na praça: [x, z, ângulo Y]. */
-export type PlayerPosition = [number, number, number];
+/** Pose corporal cosmética do avatar. */
+export enum AvatarPose {
+  IDLE = 0,
+  SITTING = 1,
+  JUMPING = 2,
+}
+
+/** Posição cosmética de um avatar na praça: [x, z, ângulo Y, pose?]. */
+export type PlayerPosition = [number, number, number, AvatarPose?];
 export type PlayerPositionMap = Record<string, PlayerPosition>;
 
 /** Estatísticas persistentes de um convidado (por navegador). */
@@ -22,6 +29,16 @@ export interface ProfileStats {
   matchesPlayed: number;
   wins: number;
   roleStats: Record<string, { played: number; wins: number }>;
+  /** Moeda cosmética ganha jogando. */
+  kokolas: number;
+  /** Skins e temas comprados. */
+  ownedSkins: string[];
+}
+
+export interface LeaderboardRow {
+  nickname: string;
+  wins: number;
+  matchesPlayed: number;
 }
 
 export interface ProfileRecentMatch {
@@ -40,6 +57,8 @@ export type ClientMessage =
         avatarId: string;
         /** Cor cosmética do morador (índice da paleta). */
         avatarColor?: number;
+        /** Skin equipada (o servidor valida a propriedade). */
+        skinId?: string;
         config?: Partial<RoomConfig>;
         /** Identidade persistente do navegador (estatísticas). */
         guestId?: string;
@@ -52,6 +71,7 @@ export type ClientMessage =
         nickname: string;
         avatarId: string;
         avatarColor?: number;
+        skinId?: string;
         /** Presente ao retomar sessão após queda de conexão. */
         sessionId?: string;
         guestId?: string;
@@ -77,7 +97,12 @@ export type ClientMessage =
   | {
       /** Movimento cosmético do avatar; nunca afeta regras. */
       type: 'player.move';
-      payload: { x: number; z: number; ry: number };
+      payload: { x: number; z: number; ry: number; pose?: AvatarPose };
+    }
+  | {
+      /** Compra na loja (Kokolas ganhas jogando; validação no servidor). */
+      type: 'shop.buy';
+      payload: { guestId: string; itemId: string; clientActionId: string };
     }
   | {
       /** Reação rápida (emoji de lista fechada); efêmera e cosmética. */
@@ -124,7 +149,22 @@ export type ServerMessage =
   | { type: 'room.left'; payload?: {} }
   | {
       type: 'profile.data';
-      payload: { profile: ProfileStats | null; recentMatches: ProfileRecentMatch[] };
+      payload: {
+        profile: ProfileStats | null;
+        recentMatches: ProfileRecentMatch[];
+        /** Ranking da vila (mais vitórias primeiro). */
+        leaderboard: LeaderboardRow[];
+      };
+    }
+  | {
+      type: 'shop.result';
+      payload: {
+        clientActionId: string;
+        accepted: boolean;
+        message?: string;
+        kokolas: number;
+        ownedSkins: string[];
+      };
     }
   /**
    * Pares do seu canal de voz (recalculado em morte, entrada e saída).

@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { GamePhase } from '../engine/types.ts';
+import { SkinEffect } from '../engine/skins.ts';
 
 // ── Paleta de avatares ─────────────────────────────────────────────────────
 
@@ -293,6 +294,8 @@ export const sharedGeometries = {
   hatStraw: new THREE.CylinderGeometry(0.2, 0.34, 0.22, 10),
   hatTop: new THREE.CylinderGeometry(0.22, 0.22, 0.34, 12),
   hood: new THREE.SphereGeometry(0.32, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62),
+  hand: new THREE.SphereGeometry(0.095, 8, 8),
+  foot: new THREE.BoxGeometry(0.16, 0.09, 0.26),
   crown: new THREE.CylinderGeometry(0.24, 0.28, 0.16, 8, 1, true),
   selectionRing: new THREE.TorusGeometry(0.72, 0.045, 10, 32),
   shadowBlob: new THREE.CircleGeometry(0.55, 20),
@@ -338,4 +341,64 @@ export function skinMaterial(tone: number): THREE.MeshStandardMaterial {
     skinMaterialCache.set(tone, mat);
   }
   return mat;
+}
+
+/** Materiais de uma skin cosmética (por rig — não compartilhados). */
+export interface SkinMaterialSet {
+  body: THREE.MeshStandardMaterial;
+  limbs: THREE.MeshStandardMaterial;
+  /** Braço direito/segundo tom, para skins bicolores. */
+  accent: THREE.MeshStandardMaterial;
+  /** Opacidade aplicada também à pele/cabeça (skin fantasma). */
+  translucent?: boolean;
+  /** Emissivo pulsa no loop (lava/neon). */
+  pulses?: boolean;
+}
+
+export function makeSkinMaterials(effect: SkinEffect, baseColor: number): SkinMaterialSet | null {
+  const std = (opts: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial(opts);
+  switch (effect) {
+    case 'shadow': {
+      const body = std({ color: 0x232633, roughness: 0.35, metalness: 0.15 });
+      return { body, limbs: std({ color: 0x14161f, roughness: 0.4 }), accent: body.clone() };
+    }
+    case 'neon': {
+      const body = std({ color: 0x0e7490, emissive: 0x22d3ee, emissiveIntensity: 0.55, roughness: 0.3 });
+      const limbs = std({ color: 0x155e75, emissive: 0x67e8f9, emissiveIntensity: 0.35, roughness: 0.3 });
+      return { body, limbs, accent: limbs.clone(), pulses: true };
+    }
+    case 'harlequin': {
+      const body = std({ color: 0xd06a8c, roughness: 0.6 });
+      const limbs = std({ color: 0x5da154, roughness: 0.6 });
+      return { body, limbs, accent: std({ color: 0x3e7bc0, roughness: 0.6 }) };
+    }
+    case 'gold': {
+      const body = std({ color: 0xf5b942, metalness: 0.85, roughness: 0.25 });
+      return { body, limbs: body.clone(), accent: body.clone() };
+    }
+    case 'lava': {
+      const body = std({ color: 0x1c1917, emissive: 0xf97316, emissiveIntensity: 0.7, roughness: 0.5 });
+      const limbs = std({ color: 0x292524, emissive: 0xdc2626, emissiveIntensity: 0.45, roughness: 0.5 });
+      return { body, limbs, accent: limbs.clone(), pulses: true };
+    }
+    case 'ghost': {
+      const body = std({
+        color: 0xdce6f5,
+        transparent: true,
+        opacity: 0.5,
+        roughness: 0.3,
+        emissive: 0x8fa8d8,
+        emissiveIntensity: 0.2,
+        depthWrite: false,
+      });
+      return { body, limbs: body.clone(), accent: body.clone(), translucent: true };
+    }
+    case 'royal': {
+      const body = std({ color: 0x7c3aed, roughness: 0.45, metalness: 0.1 });
+      const accent = std({ color: 0xf5b942, metalness: 0.7, roughness: 0.3 });
+      return { body, limbs: std({ color: 0x4c1d95, roughness: 0.5 }), accent };
+    }
+    default:
+      return null;
+  }
 }

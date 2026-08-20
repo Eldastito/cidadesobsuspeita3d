@@ -80,6 +80,14 @@ Durante a **noite**, todos os avatares voltam a seus assentos e dormem — o mov
 
 Implementado: motor determinístico com todos os papéis, votação secreta **e votação aberta em sequência** (modo clássico do vídeo, com o avatar apontando o acusado), segundo turno e voto de minerva do Prefeito, **voz WebRTC** com canal dos vivos e cemitério isolado (malha P2P, ver [ADR 001](docs/adr/001-voz-webrtc-malha.md)), chat com canal isolado de mortos, **emotes/reações em tempo real**, caderno do Detetive, palpites do Cidadão, **julgamento teatral** (o eliminado caminha ao centro da praça), tutorial por papel, linha do tempo pós-jogo com auditoria, revanche, bots, reconexão, narrador com legendas (acessibilidade), praça 3D com ciclo dia/noite, animações e movimento livre.
 
+### Economia Kokola, skins, ranking e movimentos
+
+- **🪙 Kokolas**: moeda 100% virtual e cosmética, ganha exclusivamente jogando (10 por partida + 15 por vitória) — nunca com dinheiro real (PRD 18). Saldo no perfil persistente.
+- **🎭 Loja da Vila**: 8 trajes de personagem (Manto Sombrio, Neon, Dourado Real, Fantasma Chique…) e 2 temas de praça (Festa Junina com bandeirinhas, Inverno com neve). Preço e propriedade validados **no servidor**; compra atômica no SQLite.
+- **🏆 Ranking da vila**: placar por vitórias na tela inicial.
+- **🕺 Novos movimentos**: além de andar, o morador **pula** (espaço/botão) e **senta nos bancos** da praça (tecla E ou botão ao se aproximar) — poses sincronizadas entre todos os jogadores.
+- Avatares ganharam mãos e pés; skins têm efeitos de material (metálico, neon pulsante, translúcido).
+
 ### Expansões (Fase 5)
 
 - **Guarda-costas 🛡️** (papel opcional): escolta alguém à noite e morre no lugar da vítima se ela for atacada.
