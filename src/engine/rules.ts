@@ -90,6 +90,7 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   revealRoleOnDeath: false,
   enableMayorTiebreak: true,
   roleInheritance: false,
+  plazaTheme: 'padrao',
 };
 
 /** Presets de sala (editor de regras da Fase 5). */

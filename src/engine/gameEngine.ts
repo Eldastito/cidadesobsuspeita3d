@@ -92,7 +92,8 @@ export class GameEngine {
     isHost: boolean,
     isBot: boolean = false,
     guestId?: string,
-    avatarColor?: number
+    avatarColor?: number,
+    skinId?: string
   ): Player {
     const existing = this.players.get(id);
     if (existing) {
@@ -102,6 +103,7 @@ export class GameEngine {
       existing.isConnected = true;
       if (guestId) existing.guestId = guestId;
       if (avatarColor !== undefined) existing.avatarColor = avatarColor;
+      if (skinId !== undefined) existing.skinId = skinId;
       return existing;
     }
 
@@ -118,6 +120,7 @@ export class GameEngine {
       nickname,
       avatarId,
       avatarColor,
+      skinId,
       isHost,
       isBot,
       isReady: isBot,
@@ -1124,6 +1127,7 @@ export class GameEngine {
         nickname: p.nickname,
         avatarId: p.avatarId,
         avatarColor: p.avatarColor,
+        skinId: p.skinId,
         isHost: p.isHost,
         isBot: p.isBot,
         isReady: p.isReady,

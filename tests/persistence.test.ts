@@ -94,6 +94,46 @@ describe('camada SQLite', () => {
     db.close();
   });
 
+  it('kokolas: crédito, compra atômica e proteção de saldo', () => {
+    const db = new Persistence(':memory:');
+    db.awardKokolas('g1', 'Aurora', 25); // cria perfil só com moedas
+    db.awardKokolas('g1', 'Aurora', 50);
+    expect(db.getProfile('g1')!.kokolas).toBe(75);
+
+    // Compra dentro do saldo
+    const ok = db.buySkin('g1', 'sombra', 60);
+    expect(ok.ok).toBe(true);
+    expect(ok.kokolas).toBe(15);
+    expect(ok.ownedSkins).toEqual(['sombra']);
+
+    // Item repetido é recusado
+    expect(db.buySkin('g1', 'sombra', 60).ok).toBe(false);
+
+    // Saldo insuficiente é recusado sem debitar
+    const poor = db.buySkin('g1', 'dourado', 120);
+    expect(poor.ok).toBe(false);
+    expect(db.getProfile('g1')!.kokolas).toBe(15);
+
+    // Perfil inexistente não compra
+    expect(db.buySkin('fantasma-id', 'sombra', 60).ok).toBe(false);
+    db.close();
+  });
+
+  it('ranking ordena por vitórias com desempate por menos partidas', () => {
+    const db = new Persistence(':memory:');
+    db.recordPlayerResult('a', 'Ana', Role.CIDADAO, true);
+    db.recordPlayerResult('a', 'Ana', Role.CIDADAO, true);
+    db.recordPlayerResult('b', 'Beto', Role.CIDADAO, true);
+    db.recordPlayerResult('b', 'Beto', Role.CIDADAO, true);
+    db.recordPlayerResult('b', 'Beto', Role.CIDADAO, false); // mesmas vitórias, mais partidas
+    db.recordPlayerResult('c', 'Caio', Role.CIDADAO, false);
+
+    const top = db.leaderboard(10);
+    expect(top.map(t => t.nickname)).toEqual(['Ana', 'Beto', 'Caio']);
+    expect(top[0].wins).toBe(2);
+    db.close();
+  });
+
   it('acumula estatísticas de perfil por papel', () => {
     const db = new Persistence(':memory:');
     db.recordPlayerResult('g1', 'Aurora', Role.DETETIVE, true);

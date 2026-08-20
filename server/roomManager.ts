@@ -12,6 +12,7 @@ import { ClientMessage, PlayerPosition, PlayerPositionMap, ServerMessage } from 
 import { getRandomBotAvatar, getRandomBotName, processBotActions } from './botAI.ts';
 import { canSignal, voicePeersFor, voiceSignature, VoiceMember } from './voiceChannels.ts';
 import { Persistence } from './persistence.ts';
+import { DEFAULT_SKIN_ID, findShopItem, KOKOLA_REWARDS } from '../src/engine/skins.ts';
 
 interface ConnectedClient {
   socket: WebSocket;
@@ -168,6 +169,9 @@ export class RoomManager {
             ? p.role === Role.ASSASSINO
             : false;
         this.persistence.recordPlayerResult(p.guestId, p.nickname, p.role, won);
+        // Kokolas: moeda cosmética ganha exclusivamente jogando
+        const earned = KOKOLA_REWARDS.matchCompleted + (won ? KOKOLA_REWARDS.victoryBonus : 0);
+        this.persistence.awardKokolas(p.guestId, p.nickname, earned);
       }
     } catch (err) {
       console.error('Falha ao registrar partida no histórico:', err);
@@ -221,9 +225,12 @@ export class RoomManager {
         return this.onRoomLeave(socket);
       case 'room.updateConfig':
         return this.withHost(socket, GamePhase.LOBBY, (room, player) => {
+          // Tema da praça é cosmético comprável: só aplica se o anfitrião possuir
+          const validatedTheme = this.validatePlazaTheme(player.guestId, msg.payload.config.plazaTheme);
           room.engine.config = {
             ...room.engine.config,
             ...msg.payload.config,
+            ...(validatedTheme !== undefined ? { plazaTheme: validatedTheme } : {}),
             rolesCount: {
               ...room.engine.config.rolesCount,
               ...(msg.payload.config.rolesCount || {}),
@@ -287,9 +294,50 @@ export class RoomManager {
                   matchesPlayed: profile.matchesPlayed,
                   wins: profile.wins,
                   roleStats: profile.roleStats as Record<string, { played: number; wins: number }>,
+                  kokolas: profile.kokolas,
+                  ownedSkins: profile.ownedSkins,
                 }
               : null,
             recentMatches: this.persistence.recentMatches(5),
+            leaderboard: this.persistence.leaderboard(10),
+          },
+        });
+        return;
+      }
+      case 'shop.buy': {
+        const { itemId, clientActionId } = msg.payload;
+        const guestId = (msg.payload.guestId || '').slice(0, 64);
+        if (!this.persistence || !guestId) {
+          this.sendSocket(socket, {
+            type: 'shop.result',
+            payload: {
+              clientActionId,
+              accepted: false,
+              message: 'Loja indisponível: entre em uma sala e jogue uma partida primeiro.',
+              kokolas: 0,
+              ownedSkins: [],
+            },
+          });
+          return;
+        }
+        // Preço vem SEMPRE do catálogo do servidor, nunca do cliente
+        const item = findShopItem(itemId);
+        if (!item || item.price <= 0) {
+          this.sendSocket(socket, {
+            type: 'shop.result',
+            payload: { clientActionId, accepted: false, message: 'Item inválido.', kokolas: 0, ownedSkins: [] },
+          });
+          return;
+        }
+        const result = this.persistence.buySkin(guestId, itemId, item.price);
+        this.sendSocket(socket, {
+          type: 'shop.result',
+          payload: {
+            clientActionId,
+            accepted: result.ok,
+            message: result.reason,
+            kokolas: result.kokolas,
+            ownedSkins: result.ownedSkins,
           },
         });
         return;
@@ -334,14 +382,16 @@ export class RoomManager {
           const player = room.engine.players.get(client.playerId);
           if (!player || !player.isAlive) return;
 
-          const { x, z, ry } = msg.payload;
+          const { x, z, ry, pose } = msg.payload;
           if (typeof x !== 'number' || typeof z !== 'number' || typeof ry !== 'number') return;
           if (!isFinite(x) || !isFinite(z) || !isFinite(ry)) return;
+          const safePose = pose === 1 || pose === 2 ? pose : 0;
 
-          // Confina ao raio da praça
+          // Confina ao raio da praça (sentado pode estar no banco, fora do raio andável)
           const dist = Math.hypot(x, z);
-          const scale = dist > PLAZA_RADIUS ? PLAZA_RADIUS / dist : 1;
-          room.positions.set(client.playerId, [x * scale, z * scale, ry]);
+          const maxDist = safePose === 1 ? PLAZA_RADIUS + 2 : PLAZA_RADIUS;
+          const scale = dist > maxDist ? maxDist / dist : 1;
+          room.positions.set(client.playerId, [x * scale, z * scale, ry, safePose]);
           room.positionsDirty = true;
         });
       case 'voice.join':
@@ -403,6 +453,28 @@ export class RoomManager {
     return Math.max(0, Math.min(11, value));
   }
 
+  /** Skin equipável: gratuita ou comprada pelo perfil — senão, a padrão. */
+  private validateSkin(guestId: string | undefined, skinId: string | undefined): string {
+    if (!skinId || skinId === DEFAULT_SKIN_ID) return DEFAULT_SKIN_ID;
+    const item = findShopItem(skinId);
+    if (!item || item.kind !== 'skin') return DEFAULT_SKIN_ID;
+    if (item.price === 0) return skinId;
+    if (!guestId || !this.persistence) return DEFAULT_SKIN_ID;
+    const profile = this.persistence.getProfile(guestId);
+    return profile?.ownedSkins.includes(skinId) ? skinId : DEFAULT_SKIN_ID;
+  }
+
+  /** Tema de praça aplicável pelo anfitrião: gratuito ou comprado. */
+  private validatePlazaTheme(guestId: string | undefined, themeId: string | undefined): string | undefined {
+    if (themeId === undefined) return undefined;
+    const item = findShopItem(themeId);
+    if (!item || item.kind !== 'theme') return 'padrao';
+    if (item.price === 0) return themeId;
+    if (!guestId || !this.persistence) return 'padrao';
+    const profile = this.persistence.getProfile(guestId);
+    return profile?.ownedSkins.includes(themeId) ? themeId : 'padrao';
+  }
+
   private onRoomCreate(
     socket: WebSocket,
     payload: {
@@ -433,7 +505,8 @@ export class RoomManager {
       true,
       false,
       payload.guestId,
-      this.sanitizeAvatarColor(payload.avatarColor)
+      this.sanitizeAvatarColor(payload.avatarColor),
+      this.validateSkin(payload.guestId, (payload as { skinId?: string }).skinId)
     );
     engine.setPlayerReady(playerId, true);
 
@@ -504,7 +577,8 @@ export class RoomManager {
         false,
         false,
         payload.guestId,
-        this.sanitizeAvatarColor(payload.avatarColor)
+        this.sanitizeAvatarColor(payload.avatarColor),
+        this.validateSkin(payload.guestId, (payload as { skinId?: string }).skinId)
       );
     } else {
       player.isConnected = true;

@@ -9,6 +9,10 @@ import { makeCobblestoneTexture, makeGrassTexture } from './sceneAssets.ts';
 
 export interface VillageHandles {
   root: THREE.Group;
+  /** Assentos dos bancos: posição + rotação (de frente para a fonte). */
+  benchSeats: Array<{ x: number; z: number; ry: number }>;
+  /** Posições dos postes (para as bandeirinhas do tema junino). */
+  lampPositions: Array<{ x: number; z: number }>;
   /** Materiais de janelas — brilham à noite. */
   windowMaterials: THREE.MeshStandardMaterial[];
   /** Materiais das lanternas dos postes. */
@@ -125,6 +129,7 @@ export function buildVillage(quality: 'low' | 'high'): VillageHandles {
 
   // ── Postes de luz ───────────────────────────────────────────────────────
   const lampCount = 6;
+  const lampPositions: Array<{ x: number; z: number }> = [];
   const poleGeo = new THREE.CylinderGeometry(0.07, 0.1, 3.1, 8);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2c313d, roughness: 0.6, metalness: 0.4 });
   const lampGeo = new THREE.BoxGeometry(0.34, 0.42, 0.34);
@@ -133,6 +138,7 @@ export function buildVillage(quality: 'low' | 'high'): VillageHandles {
     const angle = (i / lampCount) * Math.PI * 2 + Math.PI / lampCount;
     const x = Math.sin(angle) * 11.6;
     const z = Math.cos(angle) * 11.6;
+    lampPositions.push({ x, z });
 
     const pole = new THREE.Mesh(poleGeo, poleMat);
     pole.position.set(x, 1.55, z);
@@ -158,7 +164,8 @@ export function buildVillage(quality: 'low' | 'high'): VillageHandles {
     }
   }
 
-  // ── Bancos ──────────────────────────────────────────────────────────────
+  // ── Bancos (com assentos interativos) ───────────────────────────────────
+  const benchSeats: Array<{ x: number; z: number; ry: number }> = [];
   const benchSeatGeo = new THREE.BoxGeometry(1.5, 0.1, 0.45);
   const benchLegGeo = new THREE.BoxGeometry(0.12, 0.4, 0.4);
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x6e4f34, roughness: 0.85 });
@@ -173,9 +180,12 @@ export function buildVillage(quality: 'low' | 'high'): VillageHandles {
     const leg2 = new THREE.Mesh(benchLegGeo, woodMat);
     leg2.position.set(0.6, 0.2, 0);
     bench.add(seat, leg1, leg2);
-    bench.position.set(Math.sin(angle) * 5.2, 0, Math.cos(angle) * 5.2);
+    const bx = Math.sin(angle) * 5.2;
+    const bz = Math.cos(angle) * 5.2;
+    bench.position.set(bx, 0, bz);
     bench.lookAt(0, 0, 0);
     root.add(bench);
+    benchSeats.push({ x: bx, z: bz, ry: Math.atan2(-bx, -bz) });
   }
 
   // ── Árvores instanciadas ────────────────────────────────────────────────
@@ -286,6 +296,8 @@ export function buildVillage(quality: 'low' | 'high'): VillageHandles {
 
   return {
     root,
+    benchSeats,
+    lampPositions,
     windowMaterials,
     lanternMaterials,
     lanternLights,

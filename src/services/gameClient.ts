@@ -13,12 +13,15 @@ import {
   RoomConfig,
 } from '../engine/types.ts';
 import {
+  AvatarPose,
   ClientMessage,
+  LeaderboardRow,
   PlayerPositionMap,
   ProfileRecentMatch,
   ProfileStats,
   ServerMessage,
 } from '../engine/protocol.ts';
+import { DEFAULT_SKIN_ID } from '../engine/skins.ts';
 import { sound } from './soundEffects.ts';
 
 const STORAGE_KEY = 'cidade-sob-suspeita:session';
@@ -42,6 +45,25 @@ export function setStoredAvatarColor(index: number): void {
     localStorage.setItem(COLOR_KEY, String(index));
   } catch {
     // sem armazenamento, sem persistência — a cor vale só nesta sessão
+  }
+}
+
+const SKIN_KEY = 'cidade-sob-suspeita:skin';
+
+/** Skin equipada (o servidor valida a propriedade ao entrar na sala). */
+export function getStoredSkin(): string {
+  try {
+    return localStorage.getItem(SKIN_KEY) || DEFAULT_SKIN_ID;
+  } catch {
+    return DEFAULT_SKIN_ID;
+  }
+}
+
+export function setStoredSkin(skinId: string): void {
+  try {
+    localStorage.setItem(SKIN_KEY, skinId);
+  } catch {
+    // sem armazenamento — skin vale só nesta sessão
   }
 }
 
@@ -95,6 +117,13 @@ export interface NarratorCaption {
 export interface ProfileData {
   profile: ProfileStats | null;
   recentMatches: ProfileRecentMatch[];
+  leaderboard: LeaderboardRow[];
+}
+
+export interface ShopNotice {
+  accepted: boolean;
+  message?: string;
+  key: number;
 }
 
 export interface GameClientState {
@@ -107,6 +136,7 @@ export interface GameClientState {
   viewMode: '3D' | '2D';
   narratorCaption: NarratorCaption | null;
   profileData: ProfileData | null;
+  shopNotice: ShopNotice | null;
 }
 
 export interface EmoteEvent {
@@ -135,7 +165,7 @@ export interface VoiceBus {
 
 /** Canal imperativo de posições e reações — consumido direto pela cena 3D. */
 export interface MovementBus {
-  sendMove: (x: number, z: number, ry: number) => void;
+  sendMove: (x: number, z: number, ry: number, pose?: AvatarPose) => void;
   subscribePositions: (cb: (positions: PlayerPositionMap) => void) => () => void;
   sendEmote: (emoji: string) => void;
   subscribeEmotes: (cb: (event: EmoteEvent) => void) => () => void;
@@ -155,6 +185,7 @@ export function useGameClient() {
     viewMode: '3D',
     narratorCaption: null,
     profileData: null,
+    shopNotice: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -252,6 +283,22 @@ export function useGameClient() {
 
       case 'profile.data': {
         setState(prev => ({ ...prev, profileData: msg.payload }));
+        break;
+      }
+
+      case 'shop.result': {
+        const { accepted, message, kokolas, ownedSkins } = msg.payload;
+        setState(prev => ({
+          ...prev,
+          shopNotice: { accepted, message, key: Date.now() },
+          profileData:
+            accepted && prev.profileData?.profile
+              ? {
+                  ...prev.profileData,
+                  profile: { ...prev.profileData.profile, kokolas, ownedSkins },
+                }
+              : prev.profileData,
+        }));
         break;
       }
 
@@ -388,6 +435,7 @@ export function useGameClient() {
         nickname,
         avatarId,
         avatarColor: getStoredAvatarColor(),
+        skinId: getStoredSkin(),
         config,
         guestId: getGuestId(),
       },
@@ -403,8 +451,16 @@ export function useGameClient() {
         nickname,
         avatarId,
         avatarColor: getStoredAvatarColor(),
+        skinId: getStoredSkin(),
         guestId: getGuestId(),
       },
+    });
+  };
+
+  const buyShopItem = (itemId: string) => {
+    send({
+      type: 'shop.buy',
+      payload: { guestId: getGuestId(), itemId, clientActionId: newActionId('shop') },
     });
   };
 
@@ -472,7 +528,7 @@ export function useGameClient() {
   // Canal de movimento estável (não muda entre renders)
   const movementBus = useMemo<MovementBus>(
     () => ({
-      sendMove: (x, z, ry) => send({ type: 'player.move', payload: { x, z, ry } }),
+      sendMove: (x, z, ry, pose) => send({ type: 'player.move', payload: { x, z, ry, pose } }),
       subscribePositions: cb => {
         positionListenersRef.current.add(cb);
         return () => positionListenersRef.current.delete(cb);
@@ -510,6 +566,7 @@ export function useGameClient() {
     createRoom,
     joinRoom,
     leaveRoom,
+    buyShopItem,
     updateConfig,
     setReady,
     startMatch,

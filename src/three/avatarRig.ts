@@ -11,12 +11,16 @@ import {
   hatStyleFor,
   makeEmojiSprite,
   makeNameSprite,
+  makeSkinMaterials,
   makeSleepSprite,
   sharedGeometries as G,
   sharedMaterials as M,
+  SkinMaterialSet,
   skinMaterial,
   skinToneFor,
 } from './sceneAssets.ts';
+import { findCharacterSkin } from '../engine/skins.ts';
+import { AvatarPose } from '../engine/protocol.ts';
 
 export interface AvatarVisualState {
   nickname: string;
@@ -73,6 +77,13 @@ export class AvatarRig {
   private pointT = 0;
   private pointTarget = new THREE.Vector3();
 
+  // Pose corporal (sentado/pulando) — cosmética e sincronizada
+  private pose: AvatarPose = AvatarPose.IDLE;
+  /** Altura extra aplicada ao grupo (pulo local ou salto encenado remoto). */
+  public verticalOffset = 0;
+  private remoteHopT = -1;
+  private skinSet: SkinMaterialSet | null = null;
+
   // Julgamento teatral: caminhar até o centro da praça antes de cair
   private pendingTrial: { stagePos: { x: number; z: number }; seatPos: { x: number; z: number; ry: number } } | null =
     null;
@@ -87,7 +98,8 @@ export class AvatarRig {
     avatarId: string,
     seatNumber: number,
     initial: AvatarVisualState,
-    avatarColorIndex?: number
+    avatarColorIndex?: number,
+    skinId?: string
   ) {
     this.playerId = playerId;
     this.state = { ...initial };
@@ -96,9 +108,26 @@ export class AvatarRig {
     this.group.userData = { playerId };
 
     const color = avatarColorFor(avatarColorIndex ?? seatNumber);
-    const skin = skinToneFor(seatNumber);
-    const bodyMat = bodyMaterial(color);
-    const skinMat = skinMaterial(skin);
+    const skinTone = skinToneFor(seatNumber);
+
+    // Skin cosmética (materiais próprios do rig, sem vantagem competitiva)
+    const skinDef = findCharacterSkin(skinId);
+    this.skinSet = makeSkinMaterials(skinDef.effect, color);
+
+    const bodyMat = this.skinSet?.body ?? bodyMaterial(color);
+    const limbMat = this.skinSet?.limbs ?? bodyMaterial(0x384358);
+    const armLMat = this.skinSet?.body ?? bodyMaterial(color);
+    const armRMat = this.skinSet?.accent ?? bodyMaterial(color);
+    const skinMat = this.skinSet?.translucent
+      ? (() => {
+          const m = skinMaterial(skinTone).clone();
+          m.transparent = true;
+          m.opacity = 0.5;
+          m.depthWrite = false;
+          return m;
+        })()
+      : skinMaterial(skinTone);
+    const castsShadow = !this.skinSet?.translucent;
 
     // Corpo articulado
     this.body = new THREE.Group();
@@ -106,14 +135,14 @@ export class AvatarRig {
 
     this.torso = new THREE.Mesh(G.torso, bodyMat);
     this.torso.position.y = 0.95;
-    this.torso.castShadow = true;
+    this.torso.castShadow = castsShadow;
     this.body.add(this.torso);
 
     // Cabeça + olhos + chapéu
     this.head = new THREE.Group();
     this.head.position.y = 1.62;
     const headMesh = new THREE.Mesh(G.head, skinMat);
-    headMesh.castShadow = true;
+    headMesh.castShadow = castsShadow;
     this.head.add(headMesh);
 
     const eyeL = new THREE.Mesh(G.eye, M.eye);
@@ -122,15 +151,29 @@ export class AvatarRig {
     eyeR.position.set(0.095, 0.03, 0.235);
     this.head.add(eyeL, eyeR);
 
-    this.addHat(avatarId, bodyMat);
+    this.addHat(avatarId, bodyMat instanceof THREE.MeshStandardMaterial ? bodyMat : bodyMaterial(color));
     this.body.add(this.head);
 
-    // Braços (pivô no ombro)
-    this.armL = this.makeLimb(G.arm, bodyMat, -0.46, 1.28, 0.21);
-    this.armR = this.makeLimb(G.arm, bodyMat, 0.46, 1.28, 0.21);
-    // Pernas (pivô no quadril)
-    this.legL = this.makeLimb(G.leg, skinMat, -0.16, 0.62, 0.2, 0x384358);
-    this.legR = this.makeLimb(G.leg, skinMat, 0.16, 0.62, 0.2, 0x384358);
+    // Braços (pivô no ombro) com mãos; pernas (pivô no quadril) com pés
+    this.armL = this.makeLimb(G.arm, armLMat, -0.46, 1.28, 0.21);
+    this.armR = this.makeLimb(G.arm, armRMat, 0.46, 1.28, 0.21);
+    const handL = new THREE.Mesh(G.hand, skinMat);
+    handL.position.y = -0.46;
+    this.armL.add(handL);
+    const handR = new THREE.Mesh(G.hand, skinMat);
+    handR.position.y = -0.46;
+    this.armR.add(handR);
+
+    this.legL = this.makeLimb(G.leg, limbMat, -0.16, 0.62, 0.2);
+    this.legR = this.makeLimb(G.leg, limbMat, 0.16, 0.62, 0.2);
+    const footMatL = this.skinSet?.limbs ?? bodyMaterial(0x26202c);
+    const footL = new THREE.Mesh(G.foot, footMatL);
+    footL.position.set(0, -0.6, 0.05);
+    this.legL.add(footL);
+    const footR = new THREE.Mesh(G.foot, footMatL);
+    footR.position.set(0, -0.6, 0.05);
+    this.legR.add(footR);
+
     this.body.add(this.armL, this.armR, this.legL, this.legR);
 
     // Sombra falsa (barata) + anel de seleção
@@ -230,6 +273,25 @@ export class AvatarRig {
     if (!this.state.isAlive) return;
     this.pointTarget.copy(target);
     this.pointT = durationSeconds;
+  }
+
+  /** Pose corporal vinda do relay (sentar/pular de outros jogadores). */
+  public setPose(pose: AvatarPose): void {
+    if (pose === this.pose) return;
+    if (pose === AvatarPose.JUMPING && this.pose !== AvatarPose.JUMPING) {
+      this.remoteHopT = 0; // salto encenado para avatares remotos
+    }
+    this.pose = pose;
+    if (pose !== AvatarPose.SITTING) {
+      // sair do banco restaura a postura
+      this.body.position.y = 0;
+      this.legL.rotation.x = 0;
+      this.legR.rotation.x = 0;
+    }
+  }
+
+  public getPose(): AvatarPose {
+    return this.pose;
   }
 
   /** Liga/desliga o indicador de fala (🔊 sobre a cabeça). */
@@ -385,6 +447,22 @@ export class AvatarRig {
       pos.z += dz * lerpFactor;
     }
 
+    // Salto encenado (avatares remotos): curva de 0,55 s
+    if (this.remoteHopT >= 0) {
+      this.remoteHopT += dt;
+      const t = this.remoteHopT / 0.55;
+      this.verticalOffset = t >= 1 ? 0 : Math.sin(Math.min(t, 1) * Math.PI) * 0.85;
+      if (t >= 1) this.remoteHopT = -1;
+    }
+    pos.y = this.verticalOffset;
+
+    // Skins com brilho pulsante (neon/lava)
+    if (this.skinSet?.pulses) {
+      const pulse = 0.45 + (Math.sin(elapsed * 3.2 + this.idleSeed) + 1) * 0.25;
+      this.skinSet.body.emissiveIntensity = pulse;
+      this.skinSet.limbs.emissiveIntensity = pulse * 0.7;
+    }
+
     // Suaviza rotação
     let dry = this.targetRotationY - this.group.rotation.y;
     while (dry > Math.PI) dry -= Math.PI * 2;
@@ -465,6 +543,25 @@ export class AvatarRig {
       if (this.ghost) {
         this.ghost.position.y = 1.55 + Math.sin(elapsed * 1.6 + this.idleSeed) * 0.12;
         this.ghost.rotation.y = Math.sin(elapsed * 0.8 + this.idleSeed) * 0.4;
+      }
+      return;
+    }
+
+    // Sentado no banco: pernas para a frente, corpo baixo, braços em repouso
+    if (this.pose === AvatarPose.SITTING) {
+      this.body.position.y += (-0.34 - this.body.position.y) * Math.min(1, dt * 8);
+      this.legL.rotation.x += (-1.35 - this.legL.rotation.x) * Math.min(1, dt * 8);
+      this.legR.rotation.x += (-1.35 - this.legR.rotation.x) * Math.min(1, dt * 8);
+      this.armL.rotation.x = -0.3;
+      this.armR.rotation.x = -0.3;
+      this.body.rotation.x = 0;
+      this.body.rotation.z = 0;
+      this.head.rotation.x = Math.sin(elapsed * 0.9 + this.idleSeed) * 0.05;
+      this.head.rotation.y = Math.sin(elapsed * 0.5 + this.idleSeed * 2) * 0.3;
+      // Pulso do anel de seleção continua visível sentado
+      if (this.selectionRing.visible) {
+        const pulse = 1 + Math.sin(elapsed * 4) * 0.08;
+        this.selectionRing.scale.setScalar(pulse);
       }
       return;
     }

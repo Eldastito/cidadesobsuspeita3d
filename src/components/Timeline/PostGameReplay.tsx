@@ -60,6 +60,19 @@ export const PostGameReplay: React.FC<PostGameReplayProps> = ({
           {isTownVictory ? '🏆' : isAssassinVictory ? '🔪' : '⚖️'}
         </div>
 
+        {/* Recompensa em Kokolas (moeda cosmética ganha jogando) */}
+        {!player.id.startsWith('bot-') && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/40 border border-amber-400/30 text-amber-300 text-xs font-bold">
+            🪙 +
+            {10 +
+              ((room.winner === VictoryWinner.TOWN && player.role !== Role.ASSASSINO) ||
+              (room.winner === VictoryWinner.ASSASSINS && player.role === Role.ASSASSINO)
+                ? 15
+                : 0)}{' '}
+            kokolas pela partida
+          </div>
+        )}
+
         <div>
           <span className="text-[10px] uppercase tracking-widest font-mono text-slate-400 font-bold block">
             RESULTADO FINAL DA OPERAÇÃO

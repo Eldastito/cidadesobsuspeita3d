@@ -92,6 +92,8 @@ export interface Player {
   avatarId: string;
   /** Cor cosmética escolhida pelo jogador (índice da paleta; sem vantagem). */
   avatarColor?: number;
+  /** Skin cosmética equipada (validada contra o perfil no servidor). */
+  skinId?: string;
   isHost: boolean;
   isBot: boolean;
   isReady: boolean;
@@ -154,6 +156,8 @@ export interface RoomConfig {
    * da cidade morre, um Cidadão vivo sorteado o herda em segredo.
    */
   roleInheritance: boolean;
+  /** Tema cosmético da praça (skin do jogo), escolhido pelo anfitrião. */
+  plazaTheme: string;
 }
 
 /** Durações fixas de fases curtas (segundos). */
@@ -245,6 +249,7 @@ export interface PublicPlayerView {
   nickname: string;
   avatarId: string;
   avatarColor?: number;
+  skinId?: string;
   isHost: boolean;
   isBot: boolean;
   isReady: boolean;
