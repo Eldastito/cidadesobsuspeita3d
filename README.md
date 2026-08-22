@@ -37,6 +37,13 @@ npm start
 
 Para jogar sozinho durante o desenvolvimento, crie uma sala e use **“Completar com bots”** no lobby.
 
+## Colocando na internet
+
+O repositório está pronto para deploy: veja o guia completo em
+[`docs/deploy.md`](docs/deploy.md) — Render com um clique (`render.yaml`),
+`Dockerfile` universal para Railway/Fly/VPS, HTTPS automático (necessário para a
+voz) e volume para o banco SQLite.
+
 ## Arquitetura
 
 ```
