@@ -1,0 +1,27 @@
+# Blueprint da Render (https://render.com) — Cidade Sob Suspeita 3D
+# Ao conectar o repositório na Render como "Blueprint", este arquivo
+# cria o serviço sozinho, com HTTPS e WebSocket funcionando.
+#
+# Plano free: o servidor "dorme" após ~15 min sem visitas (o primeiro
+# acesso seguinte demora ~1 min) e o disco é efêmero — Kokolas, perfis e
+# partidas zeram a cada deploy/reinício. Para persistência de verdade,
+# use um plano pago e descomente o bloco "disk" abaixo.
+
+services:
+  - type: web
+    name: cidade-sob-suspeita-3d
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.14.0
+    # Persistência (requer plano pago; o caminho casa com CSS3D_DB_PATH):
+    # disk:
+    #   name: dados-da-vila
+    #   mountPath: /opt/render/project/src/data
+    #   sizeGB: 1

@@ -11,7 +11,8 @@ import { createServer as createViteServer } from 'vite';
 import { RoomManager } from './server/roomManager.ts';
 import { Persistence } from './server/persistence.ts';
 
-const PORT = 3000;
+// Plataformas de hospedagem (Render, Railway, Fly…) injetam a porta via env
+const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   const app = express();
