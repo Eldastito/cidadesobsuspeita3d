@@ -70,14 +70,17 @@ export const RuleSummaryModal: React.FC<RuleSummaryModalProps> = ({ isOpen, onCl
           </h4>
           <ul className="space-y-1.5 text-slate-300 text-[11px] list-disc list-inside leading-relaxed bg-ink-950/60 p-3 rounded-xl border border-white/5">
             <li>
-              <strong>Noite:</strong> todos "dormem" nos seus lugares. Assassinos escolhem uma vítima;
-              Médico protege alguém; Detetive investiga; Bruxa decide entre as poções; Cidadãos anotam
-              um palpite privado. As ações são resolvidas juntas: proteção do Médico e escudo da Bruxa
-              bloqueiam o ataque; a poção de morte da Bruxa não é bloqueada.
+              <strong>Noite:</strong> "Cidade dorme!" — o narrador chama um papel de cada vez, como na
+              roda clássica: Assassinos marcam a vítima (um toque basta; a última marcação da equipe
+              vale), depois o Médico protege, a Bruxa decide as poções, o Guarda escolta e o Detetive
+              pergunta (com resposta na hora). Quem não foi chamado só dorme — Cidadãos dormem a noite
+              toda. Proteção do Médico e escudo da Bruxa bloqueiam o ataque; a poção de morte da Bruxa
+              não é bloqueada.
             </li>
             <li>
-              <strong>Amanhecer:</strong> o narrador anuncia quem morreu — nunca quem agiu, salvou ou
-              investigou.
+              <strong>Amanhecer:</strong> o narrador anuncia quem morreu — e avisa se houve um ataque
+              bloqueado, sem revelar quem agiu ou salvou. Quem agiu recebe um recado secreto sobre o
+              resultado.
             </li>
             <li>
               <strong>Debate:</strong> os vivos conversam na praça e podem circular livremente pelo
@@ -96,8 +99,9 @@ export const RuleSummaryModal: React.FC<RuleSummaryModalProps> = ({ isOpen, onCl
               vencem quando igualam o número de moradores vivos da cidade.
             </li>
             <li>
-              <strong>Morte:</strong> quem morre não fala, não vota e não herda papel. Os papéis são
-              revelados apenas no fim da partida (a menos que a sala configure diferente).
+              <strong>Morte:</strong> quem morre não fala, não vota e não herda papel. Por padrão o
+              papel de quem morre é revelado a todos (a sala pode desligar isso para um modo mais
+              misterioso).
             </li>
           </ul>
         </div>

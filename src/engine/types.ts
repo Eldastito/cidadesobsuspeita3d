@@ -44,6 +44,20 @@ export enum NightActionType {
   PASS = 'PASS', // Não agir
 }
 
+/**
+ * Chamada do narrador durante a noite (roteiro do jogo clássico):
+ * cada papel age no seu próprio turno, todos os demais "dormem".
+ * A chamada é pública — como a voz do narrador na roda — mas quem
+ * está acordado e o que escolheu continuam secretos.
+ */
+export enum NightTurn {
+  ASSASSINS = 'ASSASSINS',
+  DOCTOR = 'DOCTOR',
+  WITCH = 'WITCH',
+  GUARD = 'GUARD',
+  DETECTIVE = 'DETECTIVE',
+}
+
 export enum VictoryWinner {
   TOWN = 'CIDADE',
   ASSASSINS = 'ASSASSINOS',
@@ -123,6 +137,13 @@ export interface Player {
 
   /** Rodada em que herdou o papel atual (modo herança). */
   inheritedRoleRound?: number;
+
+  /**
+   * Recado secreto do narrador no amanhecer ("seu golpe foi bloqueado",
+   * "sua proteção salvou uma vida"…). Visível só ao próprio jogador,
+   * limpo na noite seguinte.
+   */
+  privateDawnNote?: string;
 }
 
 /** Modo de votação diurna (PRD 6.7). */
@@ -169,6 +190,8 @@ export const PHASE_DURATIONS = {
   dayResolution: 8,
   /** Janela de cada votante no modo sequencial. */
   sequentialVoteTurn: 15,
+  /** Janela máxima de cada chamada do narrador na noite. */
+  nightTurn: 20,
 } as const;
 
 export interface NightSubmission {
@@ -195,6 +218,12 @@ export interface DawnSummary {
     revealedRole?: Role;
   }>;
   narrativeText: string;
+  /**
+   * Houve um ataque dos assassinos, mas a vítima sobreviveu (proteção).
+   * Público — como o narrador anunciando "o anjo salvou" — sem revelar
+   * quem foi o alvo nem qual proteção agiu.
+   */
+  attackBlocked: boolean;
 }
 
 export interface VotingSummary {
@@ -288,6 +317,13 @@ export interface PrivatePlayerSnapshot {
     hunchLog?: HunchEntry[];
     /** Comparsas, apenas se o jogador for Assassino. */
     fellowAssassinIds?: string[];
+    /**
+     * Alvo combinado da equipe de assassinos nesta noite (visível só a eles):
+     * a última marcação vale para todos — sem sorteio interno.
+     */
+    assassinTeamTarget?: { targetId: string; markedById: string } | null;
+    /** Recado secreto do narrador sobre a última noite (só o próprio vê). */
+    privateDawnNote?: string;
     currentNightAction?: NightSubmission | null;
     currentVote?: string | null;
     hasVoted?: boolean;
@@ -309,6 +345,8 @@ export interface PrivatePlayerSnapshot {
     tieCandidateIds: string[];
     /** Votante da vez no modo sequencial (null fora dele). */
     currentVoterId: string | null;
+    /** Chamada do narrador em curso na noite (pública; null fora da noite). */
+    nightTurn: NightTurn | null;
     timeline: TimelineEvent[];
     allRolesRevealed?: Record<string, Role>; // apenas em FINISHED
   };

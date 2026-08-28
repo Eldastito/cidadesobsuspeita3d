@@ -693,7 +693,7 @@ export class RoomManager {
       const shouldAdvance =
         engine.phaseTimeRemaining <= 0 ||
         (engine.phase === GamePhase.ROLE_REVEAL && engine.areAllRolesConfirmed()) ||
-        (engine.phase === GamePhase.NIGHT_ACTIONS && engine.allNightActionsSubmitted()) ||
+        (engine.phase === GamePhase.NIGHT_ACTIONS && engine.shouldAdvanceNightTurn()) ||
         ((engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF) &&
           engine.allVotesSubmitted());
 
@@ -723,6 +723,9 @@ export class RoomManager {
         break;
 
       case GamePhase.NIGHT_ACTIONS:
+        // A noite é um roteiro de chamadas do narrador: enquanto houver
+        // papel a chamar, seguimos o roteiro; quando acaba, amanhece.
+        if (engine.advanceNightTurn()) break;
         engine.resolveNight();
         engine.startDawn();
         break;

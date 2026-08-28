@@ -10,6 +10,7 @@ import {
   GamePhase,
   NightActionType,
   NightSubmission,
+  NightTurn,
   PHASE_DURATIONS,
   Player,
   PrivatePlayerSnapshot,
@@ -22,9 +23,23 @@ import {
   VotingOutcome,
   VotingSummary,
 } from './types.ts';
-import { generateRoleDeck, securePick, secureShuffle, validateComposition } from './rules.ts';
+import {
+  generateRoleDeck,
+  NIGHT_TURN_ROLE,
+  securePick,
+  secureRandomInt,
+  secureShuffle,
+  validateComposition,
+} from './rules.ts';
 
 const MAX_SEATS = 16;
+
+/**
+ * Tempo mínimo de cada chamada do narrador antes de seguir adiante,
+ * mesmo que todos já tenham agido — evita deduzir pela velocidade
+ * quem está acordado.
+ */
+const NIGHT_TURN_MIN_SECONDS = 3;
 
 /** Estado completo do motor, serializável para persistência. */
 export interface SerializedEngine {
@@ -47,6 +62,10 @@ export interface SerializedEngine {
   voteOrder: string[];
   currentVoterIndex: number;
   eventSeq: number;
+  nightTurnQueue?: NightTurn[];
+  nightTurnIndex?: number;
+  assassinTeamTargetId?: string | null;
+  assassinTeamMarkedById?: string | null;
 }
 
 export class GameEngine {
@@ -67,6 +86,13 @@ export class GameEngine {
   public pendingNightActions: Map<string, NightSubmission> = new Map();
   public pendingVotes: Map<string, string | null> = new Map();
   public tieCandidateIds: string[] = [];
+
+  // Noite narrada em turnos (roteiro do narrador)
+  public nightTurnQueue: NightTurn[] = [];
+  public nightTurnIndex: number = -1;
+  /** Alvo combinado da equipe de assassinos: a última marcação vale. */
+  public assassinTeamTargetId: string | null = null;
+  public assassinTeamMarkedById: string | null = null;
 
   // Votação sequencial (ordem de assentos)
   public voteOrder: string[] = [];
@@ -215,6 +241,7 @@ export class GameEngine {
       player.deathReason = undefined;
       player.deathRound = undefined;
       player.inheritedRoleRound = undefined;
+      player.privateDawnNote = undefined;
       player.isMayor = false;
     });
 
@@ -252,6 +279,10 @@ export class GameEngine {
     this.tieCandidateIds = [];
     this.pendingNightActions.clear();
     this.pendingVotes.clear();
+    this.nightTurnQueue = [];
+    this.nightTurnIndex = -1;
+    this.assassinTeamTargetId = null;
+    this.assassinTeamMarkedById = null;
     this.timeline = [];
     this.phaseTimeRemaining = 0;
     this.phaseDuration = 0;
@@ -265,6 +296,7 @@ export class GameEngine {
       p.deathReason = undefined;
       p.deathRound = undefined;
       p.inheritedRoleRound = undefined;
+      p.privateDawnNote = undefined;
     });
     // Remove jogadores que abandonaram durante a partida
     Array.from(this.players.values())
@@ -283,18 +315,74 @@ export class GameEngine {
     return active.length > 0 && active.every(p => p.hasConfirmedRole);
   }
 
-  // ── Noite ────────────────────────────────────────────────────────────────
+  // ── Noite (roteiro do narrador em turnos) ────────────────────────────────
 
   public startNight(): void {
     this.phase = GamePhase.NIGHT_ACTIONS;
-    this.setTimer(this.config.nightDurationSeconds);
     this.pendingNightActions.clear();
+    this.assassinTeamTargetId = null;
+    this.assassinTeamMarkedById = null;
+    this.players.forEach(p => (p.privateDawnNote = undefined));
+
+    // Ordem clássica das chamadas; só entram papéis que existem na partida.
+    const { doctor, witch, bodyguard, detective } = this.config.rolesCount;
+    this.nightTurnQueue = [NightTurn.ASSASSINS];
+    if (doctor > 0) this.nightTurnQueue.push(NightTurn.DOCTOR);
+    if (witch > 0) this.nightTurnQueue.push(NightTurn.WITCH);
+    if ((bodyguard || 0) > 0) this.nightTurnQueue.push(NightTurn.GUARD);
+    if (detective > 0) this.nightTurnQueue.push(NightTurn.DETECTIVE);
+    this.nightTurnIndex = 0;
+    this.beginNightTurn();
 
     this.addTimelineEvent(
       'NIGHT_START',
       `Noite ${this.roundNumber}`,
       'A escuridão cobre a cidade e cada um se recolhe com seus segredos.'
     );
+  }
+
+  public get currentNightTurn(): NightTurn | null {
+    if (this.phase !== GamePhase.NIGHT_ACTIONS) return null;
+    return this.nightTurnQueue[this.nightTurnIndex] ?? null;
+  }
+
+  /** Vivos que respondem à chamada atual (bots contam; desconectados não). */
+  private nightTurnActors(turn: NightTurn): Player[] {
+    const role = NIGHT_TURN_ROLE[turn];
+    return Array.from(this.players.values()).filter(
+      p => p.isAlive && p.role === role && (p.isConnected || p.isBot)
+    );
+  }
+
+  /**
+   * Abre a chamada atual. Papéis mortos/ausentes ainda são "chamados" por
+   * alguns segundos aleatórios — como um narrador de verdade faria — para
+   * ninguém deduzir pelo relógio quem continua vivo.
+   */
+  private beginNightTurn(): void {
+    const turn = this.nightTurnQueue[this.nightTurnIndex];
+    if (!turn) return;
+    const hasActors = this.nightTurnActors(turn).length > 0;
+    this.setTimer(hasActors ? PHASE_DURATIONS.nightTurn : 4 + secureRandomInt(5));
+  }
+
+  /** Todos os chamados da vez já agiram (e o mínimo teatral passou)? */
+  public shouldAdvanceNightTurn(): boolean {
+    const turn = this.currentNightTurn;
+    if (!turn) return false;
+    const actors = this.nightTurnActors(turn);
+    if (actors.length === 0) return false; // chamada falsa: só o tempo encerra
+    const elapsed = this.phaseDuration - this.phaseTimeRemaining;
+    if (elapsed < NIGHT_TURN_MIN_SECONDS) return false;
+    return actors.every(p => this.pendingNightActions.has(p.id));
+  }
+
+  /** Próxima chamada do narrador; false quando o roteiro da noite acabou. */
+  public advanceNightTurn(): boolean {
+    this.nightTurnIndex += 1;
+    if (this.nightTurnIndex >= this.nightTurnQueue.length) return false;
+    this.beginNightTurn();
+    return true;
   }
 
   public submitNightAction(submission: NightSubmission): { accepted: boolean; message?: string } {
@@ -350,6 +438,10 @@ export class GameEngine {
         if (target.id === player.id) {
           return { accepted: false, message: 'O Detetive não investiga a si mesmo.' };
         }
+        // A resposta chega na hora (gesto do narrador) — logo, uma por noite.
+        if (player.investigationLog.some(e => e.round === this.roundNumber)) {
+          return { accepted: false, message: 'Você já investigou alguém esta noite.' };
+        }
         break;
       }
       case Role.GUARDA: {
@@ -381,13 +473,26 @@ export class GameEngine {
     }
 
     this.pendingNightActions.set(player.id, submission);
-    return { accepted: true };
-  }
 
-  /** Todos os vivos conectados já enviaram algo? (evita vazar timing por fase encurtada) */
-  public allNightActionsSubmitted(): boolean {
-    const alive = Array.from(this.players.values()).filter(p => p.isAlive && (p.isConnected || p.isBot));
-    return alive.length > 0 && alive.every(p => this.pendingNightActions.has(p.id));
+    // Assassinos: a marcação vira o alvo ÚNICO da equipe (última vale),
+    // visível ao vivo para os comparsas — sem maioria nem sorteio interno.
+    if (player.role === Role.ASSASSINO && submission.actionType === NightActionType.KILL && target) {
+      this.assassinTeamTargetId = target.id;
+      this.assassinTeamMarkedById = player.id;
+    }
+
+    // Detetive: o narrador responde na hora, com o gesto de polegar.
+    if (player.role === Role.DETETIVE && submission.actionType === NightActionType.INVESTIGATE && target) {
+      const entry: DetectiveEntry = {
+        round: this.roundNumber,
+        targetId: target.id,
+        targetNickname: target.nickname,
+        isSuspicious: target.role === Role.ASSASSINO,
+      };
+      player.investigationLog.push(entry);
+    }
+
+    return { accepted: true };
   }
 
   /**
@@ -401,23 +506,28 @@ export class GameEngine {
     const alivePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
     const assassins = alivePlayers.filter(p => p.role === Role.ASSASSINO);
     const doctor = alivePlayers.find(p => p.role === Role.MEDICO);
-    const detective = alivePlayers.find(p => p.role === Role.DETETIVE);
     const witch = alivePlayers.find(p => p.role === Role.BRUXA);
 
-    // 1. Alvo dos assassinos: maioria simples; empate interno é sorteado (CSPRNG)
+    // 1. Alvo dos assassinos: a marcação da equipe (última vale — o que o
+    // jogador escolheu É o que acontece). Fallback para a maioria das ações
+    // individuais só em partidas restauradas de versões antigas.
     let assassinTargetId: string | null = null;
-    const assassinVotes: Record<string, number> = {};
-    for (const a of assassins) {
-      const act = this.pendingNightActions.get(a.id);
-      if (act && act.actionType === NightActionType.KILL && act.targetId) {
-        assassinVotes[act.targetId] = (assassinVotes[act.targetId] || 0) + 1;
+    if (this.assassinTeamTargetId && this.players.get(this.assassinTeamTargetId)?.isAlive) {
+      assassinTargetId = this.assassinTeamTargetId;
+    } else {
+      const assassinVotes: Record<string, number> = {};
+      for (const a of assassins) {
+        const act = this.pendingNightActions.get(a.id);
+        if (act && act.actionType === NightActionType.KILL && act.targetId) {
+          assassinVotes[act.targetId] = (assassinVotes[act.targetId] || 0) + 1;
+        }
       }
-    }
-    const targetEntries = Object.entries(assassinVotes);
-    if (targetEntries.length > 0) {
-      const topCount = Math.max(...targetEntries.map(([, n]) => n));
-      const topTargets = targetEntries.filter(([, n]) => n === topCount).map(([id]) => id);
-      assassinTargetId = securePick(topTargets) || null;
+      const targetEntries = Object.entries(assassinVotes);
+      if (targetEntries.length > 0) {
+        const topCount = Math.max(...targetEntries.map(([, n]) => n));
+        const topTargets = targetEntries.filter(([, n]) => n === topCount).map(([id]) => id);
+        assassinTargetId = securePick(topTargets) || null;
+      }
     }
 
     // 2. Proteção coletiva da Bruxa
@@ -453,22 +563,8 @@ export class GameEngine {
       }
     }
 
-    // 5. Investigação do Detetive
-    if (detective) {
-      const detAct = this.pendingNightActions.get(detective.id);
-      if (detAct && detAct.actionType === NightActionType.INVESTIGATE && detAct.targetId) {
-        const target = this.players.get(detAct.targetId);
-        if (target) {
-          const entry: DetectiveEntry = {
-            round: this.roundNumber,
-            targetId: target.id,
-            targetNickname: target.nickname,
-            isSuspicious: target.role === Role.ASSASSINO,
-          };
-          detective.investigationLog.push(entry);
-        }
-      }
-    }
+    // 5. Investigação do Detetive: registrada NA HORA da submissão (o
+    // narrador responde com o gesto do polegar) — nada a fazer aqui.
 
     // 5b. Palpites dos cidadãos (sem efeito mecânico, só memória privada)
     for (const p of alivePlayers) {
@@ -500,9 +596,11 @@ export class GameEngine {
     // 6. Consolidação das mortes (idempotente via Set)
     const deadSet = new Set<string>();
     let bodyguardSacrificed = false;
+    let attackBlocked = false;
 
     if (assassinTargetId) {
       const isProtected = witchUsedProtectAll || doctorTargetId === assassinTargetId;
+      if (isProtected) attackBlocked = true;
       if (!isProtected) {
         // O Guarda-costas intercepta o golpe e morre no lugar da vítima
         if (bodyguardId && bodyguardTargetId === assassinTargetId) {
@@ -548,11 +646,36 @@ export class GameEngine {
 
     let narrativeText = '';
     if (killedList.length === 0) {
-      narrativeText = 'A cidade acorda aliviada: ninguém morreu esta noite.';
+      narrativeText = attackBlocked
+        ? 'Houve um ataque esta noite — mas a vítima escapou por pouco. Ninguém morreu.'
+        : 'A cidade acorda aliviada: a noite passou tranquila e ninguém morreu.';
     } else if (killedList.length === 1) {
       narrativeText = `O sino da capela toca devagar. ${killedList[0].nickname} foi encontrado sem vida ao amanhecer.`;
     } else {
       narrativeText = `Uma noite terrível se abateu sobre a cidade. Perdemos ${killedList.map(k => k.nickname).join(' e ')}.`;
+    }
+
+    // Recados secretos do narrador — causa e efeito para quem agiu,
+    // sem revelar publicamente quem/o que bloqueou.
+    const attackVictim = assassinTargetId ? this.players.get(assassinTargetId) : null;
+    if (assassinTargetId) {
+      const assassinNote = attackBlocked
+        ? 'Seu golpe foi bloqueado por uma proteção misteriosa. A vítima sobreviveu.'
+        : bodyguardSacrificed
+        ? `Uma escolta se jogou na frente do golpe e caiu no lugar de ${attackVictim?.nickname ?? 'sua vítima'}.`
+        : `O plano funcionou: ${attackVictim?.nickname ?? 'a vítima'} não acorda mais.`;
+      assassins.forEach(a => (a.privateDawnNote = assassinNote));
+    }
+    if (doctor && doctorTargetId) {
+      doctor.privateDawnNote =
+        doctorTargetId === assassinTargetId && !witchUsedProtectAll
+          ? 'Sua proteção salvou uma vida esta noite! 🎉'
+          : 'Seu paciente passou a noite em segurança — nenhum ataque o alcançou.';
+    }
+    if (witch && witchUsedProtectAll) {
+      witch.privateDawnNote = assassinTargetId
+        ? 'Seu escudo coletivo bloqueou o ataque dos assassinos!'
+        : 'Seu escudo coletivo protegeu a cidade — mas nenhum ataque veio.';
     }
 
     this.dawnSummary = {
@@ -560,6 +683,7 @@ export class GameEngine {
       killedPlayerIds: Array.from(deadSet),
       deaths: killedList,
       narrativeText,
+      attackBlocked,
     };
 
     this.addTimelineEvent(
@@ -580,6 +704,10 @@ export class GameEngine {
 
     // Modo herança: poderes perdidos passam a Cidadãos sorteados
     this.applyInheritance(Array.from(deadSet));
+
+    // A marcação da equipe morre com a noite (evita exibir alvo velho de dia)
+    this.assassinTeamTargetId = null;
+    this.assassinTeamMarkedById = null;
 
     return this.dawnSummary;
   }
@@ -1052,6 +1180,10 @@ export class GameEngine {
       voteOrder: this.voteOrder,
       currentVoterIndex: this.currentVoterIndex,
       eventSeq: this.eventSeq,
+      nightTurnQueue: this.nightTurnQueue,
+      nightTurnIndex: this.nightTurnIndex,
+      assassinTeamTargetId: this.assassinTeamTargetId,
+      assassinTeamMarkedById: this.assassinTeamMarkedById,
     };
   }
 
@@ -1074,6 +1206,12 @@ export class GameEngine {
     engine.voteOrder = data.voteOrder;
     engine.currentVoterIndex = data.currentVoterIndex;
     engine.eventSeq = data.eventSeq;
+    // Campos da noite em turnos: ausentes em partidas salvas por versões
+    // antigas — a noite corrente resolve pelo fallback de maioria.
+    engine.nightTurnQueue = data.nightTurnQueue ?? [];
+    engine.nightTurnIndex = data.nightTurnIndex ?? -1;
+    engine.assassinTeamTargetId = data.assassinTeamTargetId ?? null;
+    engine.assassinTeamMarkedById = data.assassinTeamMarkedById ?? null;
     data.players.forEach(p => {
       engine.players.set(p.id, { ...p, isConnected: p.isBot });
     });
@@ -1179,6 +1317,13 @@ export class GameEngine {
         investigationLog: player.role === Role.DETETIVE ? player.investigationLog : undefined,
         hunchLog: player.role === Role.CIDADAO ? player.hunchLog : undefined,
         fellowAssassinIds,
+        assassinTeamTarget:
+          player.role === Role.ASSASSINO
+            ? this.assassinTeamTargetId && this.assassinTeamMarkedById
+              ? { targetId: this.assassinTeamTargetId, markedById: this.assassinTeamMarkedById }
+              : null
+            : undefined,
+        privateDawnNote: player.privateDawnNote,
         currentNightAction: this.pendingNightActions.get(player.id) || null,
         currentVote: this.pendingVotes.get(player.id) ?? null,
         hasVoted: this.pendingVotes.has(player.id),
@@ -1201,6 +1346,7 @@ export class GameEngine {
             ? this.tieCandidateIds
             : [],
         currentVoterId: this.currentVoterId,
+        nightTurn: this.currentNightTurn,
         timeline: this.timeline.map(t => ({
           ...t,
           secretPayload: isFinished ? t.secretPayload : undefined,

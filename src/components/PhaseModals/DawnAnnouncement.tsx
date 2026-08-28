@@ -3,16 +3,22 @@
  */
 
 import React from 'react';
-import { Newspaper, Skull, Sun } from 'lucide-react';
+import { Newspaper, ShieldAlert, Skull, Sun } from 'lucide-react';
 import { DawnSummary } from '../../engine/types.ts';
 import { ROLE_METADATA } from '../../engine/rules.ts';
 
 interface DawnAnnouncementProps {
   summary: DawnSummary | null;
   timeRemaining: number;
+  /** Recado secreto do narrador para ESTE jogador (ex.: "seu golpe foi bloqueado"). */
+  privateNote?: string;
 }
 
-export const DawnAnnouncement: React.FC<DawnAnnouncementProps> = ({ summary, timeRemaining }) => {
+export const DawnAnnouncement: React.FC<DawnAnnouncementProps> = ({
+  summary,
+  timeRemaining,
+  privateNote,
+}) => {
   if (!summary) return null;
 
   const hasDeaths = summary.deaths.length > 0;
@@ -71,13 +77,28 @@ export const DawnAnnouncement: React.FC<DawnAnnouncementProps> = ({ summary, tim
               })}
             </div>
           </div>
+        ) : summary.attackBlocked ? (
+          <div className="pt-2 border-t border-white/5 text-[11px] font-mono text-amber-300 flex items-center gap-1.5">
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>HOUVE UM ATAQUE — MAS A VÍTIMA FOI PROTEGIDA E SOBREVIVEU!</span>
+          </div>
         ) : (
           <div className="pt-2 border-t border-white/5 text-[11px] font-mono text-emerald-400 flex items-center gap-1.5">
             <Sun className="w-3.5 h-3.5" />
-            <span>NENHUMA VÍTIMA REGISTRADA. PROTEÇÃO MÉDICA/ALQUÍMICA BEM SUCEDIDA!</span>
+            <span>NOITE TRANQUILA: NENHUM ATAQUE REGISTRADO NA CIDADE.</span>
           </div>
         )}
       </div>
+
+      {/* Recado secreto do narrador — só este jogador vê */}
+      {privateNote && (
+        <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/25 rounded space-y-0.5">
+          <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-indigo-300 block">
+            🤫 Só você recebeu este recado
+          </span>
+          <p className="text-xs text-indigo-200 leading-relaxed">{privateNote}</p>
+        </div>
+      )}
     </div>
   );
 };

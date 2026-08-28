@@ -20,7 +20,7 @@ function tick(engine: GameEngine): void {
   const shouldAdvance =
     engine.phaseTimeRemaining <= 0 ||
     (engine.phase === GamePhase.ROLE_REVEAL && engine.areAllRolesConfirmed()) ||
-    (engine.phase === GamePhase.NIGHT_ACTIONS && engine.allNightActionsSubmitted()) ||
+    (engine.phase === GamePhase.NIGHT_ACTIONS && engine.shouldAdvanceNightTurn()) ||
     ((engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF) &&
       engine.allVotesSubmitted());
 
@@ -31,6 +31,8 @@ function tick(engine: GameEngine): void {
       engine.startNight();
       break;
     case GamePhase.NIGHT_ACTIONS:
+      // Roteiro do narrador: segue as chamadas até o amanhecer
+      if (engine.advanceNightTurn()) break;
       engine.resolveNight();
       engine.startDawn();
       break;
