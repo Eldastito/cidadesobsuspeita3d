@@ -9,9 +9,11 @@ import {
   ChatMessage,
   GamePhase,
   NightActionType,
+  NightTurn,
   PrivatePlayerSnapshot,
   RoomConfig,
 } from '../engine/types.ts';
+import { NIGHT_TURN_CALLS } from '../engine/rules.ts';
 import {
   AvatarPose,
   ClientMessage,
@@ -191,6 +193,7 @@ export function useGameClient() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPhaseRef = useRef<GamePhase | null>(null);
+  const lastNightTurnRef = useRef<NightTurn | null>(null);
   const storedSessionRef = useRef<StoredSession | null>(null);
   const pendingIdentityRef = useRef<{ nickname: string; avatarId: string } | null>(null);
   const positionListenersRef = useRef<Set<PositionListener>>(new Set());
@@ -220,7 +223,7 @@ export function useGameClient() {
 
           if (phase === GamePhase.NIGHT_ACTIONS) {
             sound.playNightWhisper();
-            narrate('A noite caiu sobre a cidade. Fechem os olhos... alguns agirão nas sombras.');
+            narrate('Cidade dorme! Fechem os olhos… o narrador vai chamar cada papel.');
           } else if (phase === GamePhase.DAWN) {
             sound.playBellToll();
             if (snapshot.room.dawnSummary?.narrativeText) {
@@ -252,6 +255,16 @@ export function useGameClient() {
             // Atualiza as estatísticas persistentes após o registro no servidor
             setTimeout(() => send({ type: 'profile.get', payload: { guestId: getGuestId() } }), 1500);
           }
+        }
+
+        // Roteiro do narrador na noite: anuncia cada chamada e limpa a
+        // seleção de alvo (evita um toque antigo virar ação por engano).
+        const nightTurn =
+          snapshot.room.phase === GamePhase.NIGHT_ACTIONS ? snapshot.room.nightTurn : null;
+        if (nightTurn !== lastNightTurnRef.current) {
+          lastNightTurnRef.current = nightTurn;
+          if (nightTurn) narrate(NIGHT_TURN_CALLS[nightTurn].call);
+          setState(prev => ({ ...prev, selectedTargetId: null }));
         }
 
         setState(prev => ({ ...prev, snapshot, lastError: null }));
@@ -333,6 +346,7 @@ export function useGameClient() {
         storedSessionRef.current = null;
         saveStoredSession(null);
         lastPhaseRef.current = null;
+        lastNightTurnRef.current = null;
         setState(prev => ({
           ...prev,
           snapshot: null,

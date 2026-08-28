@@ -179,12 +179,15 @@ export default function App() {
                   />
                 )}
 
-                {/* Legenda do narrador (acessibilidade: fase nunca depende só de áudio) */}
+                {/* Legenda do narrador (acessibilidade: fase nunca depende só de áudio).
+                    À noite sobe para o topo — o console noturno ocupa a base. */}
                 {captionVisible && narratorCaption && (
                   <div
                     key={narratorCaption.key}
                     role="status"
-                    className="narrator-caption absolute bottom-14 left-1/2 -translate-x-1/2 max-w-[92%] sm:max-w-md bg-ink-950/85 backdrop-blur-md border border-lantern-400/25 rounded-xl px-4 py-2 text-center pointer-events-none"
+                    className={`narrator-caption absolute ${
+                      isNight ? 'top-3' : 'bottom-14'
+                    } left-1/2 -translate-x-1/2 max-w-[92%] sm:max-w-md bg-ink-950/85 backdrop-blur-md border border-lantern-400/25 rounded-xl px-4 py-2 text-center pointer-events-none z-30`}
                   >
                     <span className="block text-[9px] uppercase tracking-[0.25em] text-lantern-300/80 font-bold mb-0.5">
                       Narrador
@@ -192,9 +195,21 @@ export default function App() {
                     <p className="text-xs text-slate-100 leading-snug">{narratorCaption.text}</p>
                   </div>
                 )}
+
+                {/* Console noturno SEMPRE à vista, sobre a praça (sem rolar a página).
+                    No modo 2D fica fora da praça para não cobrir os moradores. */}
+                {isNight && viewMode === '3D' && (
+                  <div className="absolute bottom-2 left-2 right-2 z-20 max-w-2xl mx-auto">
+                    <NightActionPanel
+                      snapshot={snapshot}
+                      selectedTargetId={selectedTargetId}
+                      onSubmitAction={submitNightAction}
+                    />
+                  </div>
+                )}
               </div>
 
-              {isNight && (
+              {isNight && viewMode === '2D' && (
                 <NightActionPanel
                   snapshot={snapshot}
                   selectedTargetId={selectedTargetId}
@@ -206,6 +221,7 @@ export default function App() {
                 <DawnAnnouncement
                   summary={snapshot.room.dawnSummary}
                   timeRemaining={snapshot.room.phaseTimeRemaining}
+                  privateNote={snapshot.player.privateDawnNote}
                 />
               )}
 

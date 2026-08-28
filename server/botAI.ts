@@ -5,6 +5,7 @@
  */
 
 import { GameEngine } from '../src/engine/gameEngine.ts';
+import { NIGHT_TURN_ROLE } from '../src/engine/rules.ts';
 import { GamePhase, NightActionType, Role } from '../src/engine/types.ts';
 
 const BOT_NAMES = [
@@ -49,9 +50,15 @@ export function processBotActions(engine: GameEngine): void {
   }
 
   if (engine.phase === GamePhase.NIGHT_ACTIONS) {
+    // Cada bot só age quando o narrador chama o SEU papel (roteiro em turnos).
+    const turn = engine.currentNightTurn;
+    if (!turn) return;
+    const turnRole = NIGHT_TURN_ROLE[turn];
+
     bots.forEach(bot => {
+      if (bot.role !== turnRole) return;
       if (engine.pendingNightActions.has(bot.id)) return;
-      // Age imediatamente quando o tempo está acabando
+      // Age imediatamente quando o turno está acabando
       if (engine.phaseTimeRemaining > 4 && Math.random() > BOT_ACT_CHANCE) return;
 
       const submit = (actionType: NightActionType, targetId?: string | null) =>
@@ -64,15 +71,25 @@ export function processBotActions(engine: GameEngine): void {
         });
 
       if (bot.role === Role.ASSASSINO) {
+        // Um comparsa (humano ou bot) já marcou o alvo? A equipe segue junto —
+        // o bot nunca "vota contra" a marcação de um humano.
+        if (engine.assassinTeamTargetId) {
+          submit(NightActionType.KILL, engine.assassinTeamTargetId);
+          return;
+        }
         const targets = alivePlayers.filter(p => p.role !== Role.ASSASSINO);
         const target = targets[Math.floor(Math.random() * targets.length)];
         if (target) submit(NightActionType.KILL, target.id);
+        else submit(NightActionType.PASS);
       } else if (bot.role === Role.MEDICO) {
-        const targets = alivePlayers.filter(p => {
-          if (p.id === bot.id && bot.doctorSelfHealUsed) return false;
-          if (p.id === bot.lastDoctorTargetId) return false;
-          return true;
-        });
+        // Plausível: protege a si mesmo na 1ª noite; depois, varia de alvo.
+        if (engine.roundNumber === 1 && !bot.doctorSelfHealUsed) {
+          submit(NightActionType.HEAL, bot.id);
+          return;
+        }
+        const targets = alivePlayers.filter(
+          p => p.id !== bot.id && p.id !== bot.lastDoctorTargetId
+        );
         const target = targets[Math.floor(Math.random() * targets.length)];
         if (target) submit(NightActionType.HEAL, target.id);
         else submit(NightActionType.PASS);
@@ -89,9 +106,14 @@ export function processBotActions(engine: GameEngine): void {
         if (target) submit(NightActionType.BODYGUARD, target.id);
         else submit(NightActionType.PASS);
       } else if (bot.role === Role.BRUXA) {
-        if (bot.witchCharges.hasProtectAllPotion && engine.roundNumber >= 2 && Math.random() < 0.25) {
+        // Reage ao jogo: o escudo entra quando a noite anterior teve morte.
+        const lastNightHadDeath =
+          engine.dawnSummary !== null &&
+          engine.dawnSummary.round === engine.roundNumber - 1 &&
+          engine.dawnSummary.deaths.length > 0;
+        if (bot.witchCharges.hasProtectAllPotion && lastNightHadDeath && Math.random() < 0.5) {
           submit(NightActionType.WITCH_PROTECT_ALL);
-        } else if (bot.witchCharges.hasKillPotion && Math.random() < 0.15) {
+        } else if (bot.witchCharges.hasKillPotion && engine.roundNumber >= 3 && Math.random() < 0.2) {
           const targets = alivePlayers.filter(p => p.id !== bot.id);
           const target = targets[Math.floor(Math.random() * targets.length)];
           if (target) submit(NightActionType.WITCH_KILL, target.id);
@@ -99,12 +121,6 @@ export function processBotActions(engine: GameEngine): void {
         } else {
           submit(NightActionType.PASS);
         }
-      } else {
-        // Cidadão: registra um palpite privado ou apenas dorme
-        const targets = alivePlayers.filter(p => p.id !== bot.id);
-        const target = targets[Math.floor(Math.random() * targets.length)];
-        if (target && Math.random() < 0.7) submit(NightActionType.OBSERVE, target.id);
-        else submit(NightActionType.PASS);
       }
     });
     return;
@@ -124,6 +140,19 @@ export function processBotActions(engine: GameEngine): void {
 
   if (engine.phase === GamePhase.VOTING || engine.phase === GamePhase.RUNOFF) {
     const sequential = engine.isSequentialVoting();
+
+    // Suspeitas PÚBLICAS da mesa (nada de espiar segredos): no modo
+    // sequencial, os votos já declarados em voz alta; no secreto, o
+    // resultado aberto do julgamento anterior.
+    const publicSuspicion: Record<string, number> = {};
+    if (sequential) {
+      engine.pendingVotes.forEach(targetId => {
+        if (targetId) publicSuspicion[targetId] = (publicSuspicion[targetId] || 0) + 1;
+      });
+    } else if (engine.lastVotingSummary && engine.lastVotingSummary.round === engine.roundNumber - 1) {
+      Object.assign(publicSuspicion, engine.lastVotingSummary.voteCounts);
+    }
+
     bots.forEach(bot => {
       if (engine.pendingVotes.has(bot.id)) return;
       // No modo sequencial, só o votante da vez declara (com uma pausa dramática)
@@ -158,7 +187,22 @@ export function processBotActions(engine: GameEngine): void {
         eligible = eligible.filter(p => p.role !== Role.ASSASSINO);
       }
 
-      if (eligible.length > 0 && Math.random() > 0.1) {
+      if (eligible.length === 0) {
+        engine.submitVote(bot.id, null);
+        return;
+      }
+
+      // Acompanha a suspeita da mesa (em vez de sortear): 60% de chance de
+      // votar no mais acusado publicamente entre os elegíveis.
+      const accused = eligible
+        .filter(p => (publicSuspicion[p.id] || 0) > 0)
+        .sort((a, b) => (publicSuspicion[b.id] || 0) - (publicSuspicion[a.id] || 0))[0];
+      if (accused && Math.random() < 0.6) {
+        engine.submitVote(bot.id, accused.id);
+        return;
+      }
+
+      if (Math.random() > 0.1) {
         const target = eligible[Math.floor(Math.random() * eligible.length)];
         engine.submitVote(bot.id, target.id);
       } else {

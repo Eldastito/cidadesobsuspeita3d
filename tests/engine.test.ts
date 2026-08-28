@@ -9,6 +9,8 @@ import { DEFAULT_ROOM_CONFIG, validateComposition } from '../src/engine/rules.ts
 import {
   GamePhase,
   NightActionType,
+  NightTurn,
+  PHASE_DURATIONS,
   Role,
   RoomConfig,
   VictoryWinner,
@@ -655,13 +657,11 @@ describe('herança de papel (modo personalizado da Fase 5)', () => {
   });
 
   it('o aviso público de herança não vaza papel nem herdeiro antes do fim', () => {
-    const engine = makeInheritanceMatch([
-      Role.ASSASSINO,
-      Role.MEDICO,
-      Role.CIDADAO,
-      Role.CIDADAO,
-      Role.CIDADAO,
-    ]);
+    // Sala sem revelação de papel na morte: o sigilo deve ser TOTAL
+    const engine = makeFixedMatch(
+      [Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO],
+      { config: { roleInheritance: true, revealRoleOnDeath: false } }
+    );
     night(engine, 'p0', NightActionType.KILL, 'p1');
     engine.resolveNight();
 
@@ -671,6 +671,163 @@ describe('herança de papel (modo personalizado da Fase 5)', () => {
     expect(inheritEvt.secretPayload).toBeUndefined();
     expect(inheritEvt.description).not.toContain('Médico');
     expect(JSON.stringify(snap.room.players)).not.toContain('MEDICO');
+
+    // Mesmo com a revelação na morte ligada (padrão), o HERDEIRO segue
+    // anônimo: nenhum jogador VIVO exibe papel antes do fim da partida.
+    const engine2 = makeInheritanceMatch([
+      Role.ASSASSINO,
+      Role.MEDICO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    night(engine2, 'p0', NightActionType.KILL, 'p1');
+    engine2.resolveNight();
+    const snap2 = engine2.getPrivateSnapshot('p0')!;
+    snap2.room.players
+      .filter(p => p.isAlive)
+      .forEach(p => expect(p.revealedRole).toBeUndefined());
+  });
+});
+
+describe('noite narrada em turnos (roteiro do narrador)', () => {
+  it('monta o roteiro conforme a composição da sala', () => {
+    const engine = makeFixedMatch(
+      [Role.ASSASSINO, Role.MEDICO, Role.BRUXA, Role.GUARDA, Role.DETETIVE, Role.CIDADAO, Role.CIDADAO],
+      { config: { rolesCount: { assassins: 1, doctor: 1, detective: 1, witch: 1, bodyguard: 1, mayor: 0 } } }
+    );
+    engine.startNight();
+    expect(engine.nightTurnQueue).toEqual([
+      NightTurn.ASSASSINS,
+      NightTurn.DOCTOR,
+      NightTurn.WITCH,
+      NightTurn.GUARD,
+      NightTurn.DETECTIVE,
+    ]);
+    expect(engine.currentNightTurn).toBe(NightTurn.ASSASSINS);
+    expect(engine.phaseDuration).toBe(PHASE_DURATIONS.nightTurn);
+
+    // Papel fora da composição não é chamado
+    const engine2 = makeFixedMatch(
+      [Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO],
+      { config: { rolesCount: { assassins: 1, doctor: 1, detective: 0, witch: 0, bodyguard: 0, mayor: 0 } } }
+    );
+    engine2.startNight();
+    expect(engine2.nightTurnQueue).toEqual([NightTurn.ASSASSINS, NightTurn.DOCTOR]);
+  });
+
+  it('turno só avança após todos os chamados agirem e o mínimo teatral passar', () => {
+    const engine = makeFixedMatch(
+      [Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO],
+      { config: { rolesCount: { assassins: 1, doctor: 1, detective: 0, witch: 0, bodyguard: 0, mayor: 0 } } }
+    );
+    engine.startNight();
+    expect(engine.shouldAdvanceNightTurn()).toBe(false); // ninguém agiu
+
+    night(engine, 'p0', NightActionType.KILL, 'p2');
+    expect(engine.shouldAdvanceNightTurn()).toBe(false); // mínimo teatral (3 s)
+
+    engine.phaseTimeRemaining -= 3;
+    expect(engine.shouldAdvanceNightTurn()).toBe(true);
+    expect(engine.advanceNightTurn()).toBe(true);
+    expect(engine.currentNightTurn).toBe(NightTurn.DOCTOR);
+
+    night(engine, 'p1', NightActionType.HEAL, 'p3');
+    engine.phaseTimeRemaining -= 3;
+    expect(engine.shouldAdvanceNightTurn()).toBe(true);
+    expect(engine.advanceNightTurn()).toBe(false); // roteiro acabou → amanhecer
+  });
+
+  it('papel morto ainda é "chamado" por alguns segundos (sem vazar pelo relógio)', () => {
+    const engine = makeFixedMatch(
+      [Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO],
+      { config: { rolesCount: { assassins: 1, doctor: 1, detective: 0, witch: 0, bodyguard: 0, mayor: 0 } } }
+    );
+    engine.players.get('p1')!.isAlive = false; // médico morto
+
+    engine.roundNumber = 2;
+    engine.startNight();
+    expect(engine.advanceNightTurn()).toBe(true);
+    expect(engine.currentNightTurn).toBe(NightTurn.DOCTOR);
+    // Chamada falsa: duração curta e aleatória; nunca completa por ação
+    expect(engine.phaseDuration).toBeGreaterThanOrEqual(4);
+    expect(engine.phaseDuration).toBeLessThanOrEqual(8);
+    expect(engine.shouldAdvanceNightTurn()).toBe(false);
+  });
+
+  it('o alvo da equipe de assassinos é a última marcação — sem sorteio', () => {
+    const engine = makeFixedMatch([
+      Role.ASSASSINO,
+      Role.ASSASSINO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+      Role.CIDADAO,
+    ]);
+    night(engine, 'p0', NightActionType.KILL, 'p2');
+    night(engine, 'p1', NightActionType.KILL, 'p3'); // troca o alvo da equipe
+
+    // Comparsas veem a marcação ao vivo; outros papéis, nunca
+    const snapAssassin = engine.getPrivateSnapshot('p0')!;
+    expect(snapAssassin.player.assassinTeamTarget).toEqual({ targetId: 'p3', markedById: 'p1' });
+    expect(engine.getPrivateSnapshot('p2')!.player.assassinTeamTarget).toBeUndefined();
+
+    const dawn = engine.resolveNight();
+    expect(dawn.killedPlayerIds).toEqual(['p3']);
+
+    // A marcação não sobrevive ao amanhecer
+    expect(engine.getPrivateSnapshot('p0')!.player.assassinTeamTarget).toBeNull();
+  });
+
+  it('detetive recebe a resposta na hora e só pergunta uma vez por noite', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.DETETIVE, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    expect(night(engine, 'p1', NightActionType.INVESTIGATE, 'p0').accepted).toBe(true);
+
+    const log = engine.players.get('p1')!.investigationLog;
+    expect(log).toHaveLength(1);
+    expect(log[0].isSuspicious).toBe(true); // resposta ANTES do amanhecer
+
+    // Segunda pergunta na mesma noite é recusada
+    expect(night(engine, 'p1', NightActionType.INVESTIGATE, 'p2').accepted).toBe(false);
+    expect(log).toHaveLength(1);
+  });
+
+  it('amanhecer conta o ataque bloqueado e entrega recados privados', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    night(engine, 'p0', NightActionType.KILL, 'p2');
+    night(engine, 'p1', NightActionType.HEAL, 'p2');
+
+    const dawn = engine.resolveNight();
+    expect(dawn.killedPlayerIds).toHaveLength(0);
+    expect(dawn.attackBlocked).toBe(true);
+    expect(dawn.narrativeText).toContain('ataque');
+
+    // Recados privados: cada um vê APENAS o seu
+    expect(engine.getPrivateSnapshot('p0')!.player.privateDawnNote).toContain('bloqueado');
+    expect(engine.getPrivateSnapshot('p1')!.player.privateDawnNote).toContain('salvou');
+    expect(engine.getPrivateSnapshot('p2')!.player.privateDawnNote).toBeUndefined();
+
+    // Noite sem ataque: sem alarde de bloqueio
+    const engine2 = makeFixedMatch([Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    night(engine2, 'p1', NightActionType.HEAL, 'p2');
+    const dawn2 = engine2.resolveNight();
+    expect(dawn2.attackBlocked).toBe(false);
+    expect(dawn2.narrativeText).toContain('tranquila');
+
+    // Golpe certeiro: assassino sabe que funcionou
+    const engine3 = makeFixedMatch([Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    night(engine3, 'p0', NightActionType.KILL, 'p2');
+    engine3.resolveNight();
+    expect(engine3.getPrivateSnapshot('p0')!.player.privateDawnNote).toContain('funcionou');
+  });
+
+  it('a chamada atual é pública no snapshot (como a voz do narrador)', () => {
+    const engine = makeFixedMatch([Role.ASSASSINO, Role.MEDICO, Role.CIDADAO, Role.CIDADAO, Role.CIDADAO]);
+    engine.startNight();
+    expect(engine.getPrivateSnapshot('p2')!.room.nightTurn).toBe(NightTurn.ASSASSINS);
+
+    engine.phase = GamePhase.DISCUSSION;
+    expect(engine.getPrivateSnapshot('p2')!.room.nightTurn).toBeNull();
   });
 });
 

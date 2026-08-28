@@ -31,7 +31,8 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 
 | Pergunta | Decisão |
 |---|---|
-| Papel revelado na morte? | **Só no fim da partida** (configurável por sala) |
+| Papel revelado na morte? | **Sim, por padrão** — causa e efeito visíveis para todos (a sala pode desligar para um modo mais misterioso) |
+| Noite | **Narrada em turnos** ("Cidade dorme!"): o narrador chama um papel de cada vez; quem não é chamado dorme. Cidadãos dormem a noite toda |
 | Médico | 1 autoproteção por partida; **não pode repetir o alvo da noite anterior** |
 | Bruxa | exatamente **1 poção de morte + 1 proteção coletiva** por partida |
 | Prefeito | **papel público** sorteado entre não-assassinos; desempata votações |
@@ -44,8 +45,10 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 
 ### Assassino 🗡️
 - Escolhe uma vítima viva por noite; não pode atacar a si mesmo nem comparsas.
-- Assassinos se conhecem. Com vários, a maioria simples define o alvo; empate interno é
-  sorteado pelo servidor (CSPRNG).
+- Assassinos se conhecem. Com vários, o alvo é uma **marcação única da equipe**:
+  qualquer assassino marca, todos veem ao vivo, e **a última marcação vale** —
+  sem votação interna nem sorteio. (Partidas restauradas de versões antigas
+  caem no antigo critério de maioria.)
 
 ### Médico 🩺
 - Protege um jogador vivo por noite contra o **ataque dos assassinos**.
@@ -53,9 +56,10 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 - Não bloqueia a poção de morte da Bruxa.
 
 ### Detetive 🔍
-- Investiga um jogador vivo por noite (nunca a si mesmo).
+- Investiga um jogador vivo por noite (nunca a si mesmo); **uma pergunta por noite**.
 - Recebe em segredo **“suspeito”** (assassino) ou **“não suspeito”** (demais), sem o papel exato.
-- Resultados ficam no caderno privado, entregues apenas após o fechamento da noite.
+- A resposta chega **na hora**, no próprio turno do Detetive (o gesto de polegar do
+  narrador), e fica registrada no caderno privado.
 
 ### Bruxa 🧪
 - Por noite escolhe **uma** opção: poção de morte (1 carga), proteção coletiva (1 carga) ou não agir.
@@ -64,9 +68,8 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 - Cargas consumidas desaparecem das opções.
 
 ### Cidadão 🏠
-- Sem poder noturno; pode **anotar um palpite privado** por noite (sem efeito mecânico —
-  também serve para esconder o timing de quem age de verdade).
-- Debate e vota durante o dia.
+- Sem poder noturno: **dorme a noite toda** — o roteiro do narrador não o chama.
+- Debate e vota durante o dia; o voto da cidade é a arma principal contra os assassinos.
 
 ### Guarda-costas 🛡️ (expansão da Fase 5, opcional)
 - Escolhe um morador vivo para escoltar a cada noite (nunca a si mesmo).
@@ -80,17 +83,31 @@ versionada aqui e refletida no motor (`src/engine`) com testes.
 - Em empate na votação, dá o **voto de minerva** entre os empatados.
 - Se estiver morto, desconectado ou não decidir a tempo → **segundo turno**.
 
-## 5. Resolução da noite (ordem determinística)
+## 5. Noite narrada e resolução (ordem determinística)
+
+A noite segue o **roteiro do narrador**, como na roda clássica: "Cidade dorme!" e
+os papéis são chamados **um de cada vez** — Assassinos → Médico → Bruxa →
+Guarda-costas → Detetive (apenas os papéis presentes na composição da sala).
+Quem não foi chamado só dorme. Cada chamada dura no máximo ~20 s e encerra
+quando todos os chamados agirem (com um mínimo teatral de alguns segundos);
+papéis **mortos ou ausentes ainda são chamados** por uma janela curta e
+aleatória, para ninguém deduzir pelo relógio quem segue vivo.
+
+Ao fim do roteiro, a resolução:
 
 1. Validar ações e cargas;
-2. Determinar o alvo dos assassinos (maioria; empate sorteado);
+2. Determinar o alvo dos assassinos (a marcação da equipe);
 3. Aplicar proteção coletiva da Bruxa;
 4. Aplicar proteção do Médico;
 5. Aplicar a escolta do Guarda-costas (se o alvo não foi salvo, o guarda morre no lugar);
 6. Aplicar poção de morte da Bruxa;
-7. Registrar investigação do Detetive (e palpites de cidadãos);
-8. Consolidar mortes **sem revelar autores** e aplicar herança de papel (se ligada);
-9. Anunciar o amanhecer; **só então** verificar vitória.
+7. Consolidar mortes **sem revelar autores** e aplicar herança de papel (se ligada);
+8. Anunciar o amanhecer — inclusive **"houve um ataque, mas a vítima escapou"**
+   quando uma proteção bloqueou o golpe (sem dizer qual) — e entregar os
+   **recados privados** (assassinos sabem se o golpe funcionou; o Médico sabe se
+   salvou alguém; a Bruxa, se o escudo agiu); **só então** verificar vitória.
+
+(A investigação do Detetive é respondida na hora da submissão, ainda no turno dele.)
 
 Se a Bruxa mata o mesmo alvo dos assassinos, há **uma única morte**. Reenvio de ação
 substitui a anterior (idempotência) — nunca duplica efeito.
@@ -128,9 +145,11 @@ substitui a anterior (idempotência) — nunca duplica efeito.
 ## 8. Sigilo (invariantes testadas)
 
 - Nenhum snapshot contém papel ou ação secreta de outro jogador.
-- Assassinos conhecem apenas os próprios comparsas.
+- Assassinos conhecem apenas os próprios comparsas (e a marcação da equipe).
 - Eventos secretos da linha do tempo só são liberados quando a partida termina.
-- Todos os papéis são revelados apenas no estado `FINISHED`.
+- Papéis de jogadores **vivos** nunca são expostos antes de `FINISHED`; o papel de
+  quem morre segue a configuração da sala (revelado por padrão).
+- Recados privados do amanhecer só chegam a quem agiu.
 
 ## 9. Máquina de estados
 
@@ -139,5 +158,7 @@ substitui a anterior (idempotência) — nunca duplica efeito.
 com saída para `FINISHED` na checagem de vitória (pós-amanhecer e pós-veredito).
 
 Fases avançam por **cronômetro do servidor** ou antes, quando todos os elegíveis já
-agiram (todos os vivos enviam algo à noite — inclusive cidadãos — para não vazar
-timing dos papéis ativos).
+agiram. Dentro de `NIGHT_ACTIONS`, o roteiro do narrador avança chamada a chamada:
+cada turno encerra quando todos os chamados agem (respeitado um mínimo teatral) ou
+quando a janela expira; papéis mortos/ausentes recebem uma chamada falsa de duração
+aleatória para não vazar timing.

@@ -3,7 +3,7 @@
  * Segue o PRD 1.0 (seção 3) e docs/game-rules.md
  */
 
-import { Role, RoleAlignment, RoomConfig, VotingMode } from './types.ts';
+import { NightTurn, Role, RoleAlignment, RoomConfig, VotingMode } from './types.ts';
 
 export const ROLE_METADATA: Record<
   Role,
@@ -21,7 +21,7 @@ export const ROLE_METADATA: Record<
     alignment: RoleAlignment.THREAT,
     description: 'Ameaça à cidade. Conhece seus comparsas e conspira na escuridão.',
     abilityDescription:
-      'Escolhe uma vítima toda noite. Com vários assassinos, o alvo mais votado entre eles é atacado. Vence quando os assassinos igualam ou superam os demais vivos.',
+      'Quando o narrador chamar, toca em alguém e a vítima está marcada. Com vários assassinos, a última marcação da equipe vale para todos. Vence quando os assassinos igualam ou superam os demais vivos.',
     color: '#f43f5e',
     emoji: '🗡️',
   },
@@ -39,7 +39,7 @@ export const ROLE_METADATA: Record<
     alignment: RoleAlignment.TOWN,
     description: 'Investigador astuto que descobre a verdade nas sombras.',
     abilityDescription:
-      'Investiga um suspeito por noite. Descobre em segredo se a pessoa é "suspeita" ou "não suspeita" e registra tudo no seu caderno privado.',
+      'Investiga um suspeito por noite e o narrador responde NA HORA: 👍 inocente ou 👎 suspeito. Tudo fica registrado no seu caderno privado.',
     color: '#3b82f6',
     emoji: '🔍',
   },
@@ -66,7 +66,7 @@ export const ROLE_METADATA: Record<
     alignment: RoleAlignment.TOWN,
     description: 'Morador da cidade que luta pela justiça e pela sobrevivência.',
     abilityDescription:
-      'Não tem poder noturno, mas pode anotar uma suspeita em segredo a cada noite. De dia, observa, debate e vota para desmascarar os assassinos.',
+      'À noite dorme tranquilo — nada a fazer. De dia, observa, debate e vota: o voto da cidade é a arma que desmascara os assassinos.',
     color: '#f59e0b',
     emoji: '🏠',
   },
@@ -75,11 +75,13 @@ export const ROLE_METADATA: Record<
 export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   minPlayers: 5,
   maxPlayers: 12,
+  // Composição clássica e legível: Assassino, Médico ("anjo"), Detetive e
+  // Cidadãos. Bruxa e Guarda-costas são opcionais (o anfitrião liga na sala).
   rolesCount: {
     assassins: 1,
     doctor: 1,
     detective: 1,
-    witch: 1,
+    witch: 0,
     bodyguard: 0,
     mayor: 1,
   },
@@ -87,10 +89,55 @@ export const DEFAULT_ROOM_CONFIG: RoomConfig = {
   discussionDurationSeconds: 90,
   votingDurationSeconds: 35,
   votingMode: VotingMode.SECRET,
-  revealRoleOnDeath: false,
+  // Revelar o papel de quem morre dá causa e efeito visíveis à partida
+  // (configurável — desligue para o modo "ninguém sabe nada").
+  revealRoleOnDeath: true,
   enableMayorTiebreak: true,
   roleInheritance: false,
   plazaTheme: 'padrao',
+};
+
+/**
+ * Roteiro do narrador na noite: papel chamado em cada turno e as falas
+ * públicas ("todos ouvem o narrador") + a instrução privada de quem age.
+ */
+export const NIGHT_TURN_ROLE: Record<NightTurn, Role> = {
+  [NightTurn.ASSASSINS]: Role.ASSASSINO,
+  [NightTurn.DOCTOR]: Role.MEDICO,
+  [NightTurn.WITCH]: Role.BRUXA,
+  [NightTurn.GUARD]: Role.GUARDA,
+  [NightTurn.DETECTIVE]: Role.DETETIVE,
+};
+
+export const NIGHT_TURN_CALLS: Record<
+  NightTurn,
+  { call: string; sleepLabel: string; prompt: string }
+> = {
+  [NightTurn.ASSASSINS]: {
+    call: 'Assassinos, acordem… escolham a vítima desta noite.',
+    sleepLabel: 'Os assassinos agem…',
+    prompt: 'Toque no morador que será atacado — a última marcação da equipe vale.',
+  },
+  [NightTurn.DOCTOR]: {
+    call: 'Médico, acorde… escolha alguém para proteger.',
+    sleepLabel: 'O Médico faz sua ronda…',
+    prompt: 'Toque em quem você quer proteger do ataque desta noite.',
+  },
+  [NightTurn.WITCH]: {
+    call: 'Bruxa, acorde… o caldeirão espera sua decisão.',
+    sleepLabel: 'A Bruxa mexe o caldeirão…',
+    prompt: 'Escolha uma poção — ou guarde as duas para outra noite.',
+  },
+  [NightTurn.GUARD]: {
+    call: 'Guarda-costas, acorde… escolha quem escoltar.',
+    sleepLabel: 'O Guarda-costas ronda as ruas…',
+    prompt: 'Toque em quem você protege com a própria vida.',
+  },
+  [NightTurn.DETECTIVE]: {
+    call: 'Detetive, acorde… aponte um suspeito.',
+    sleepLabel: 'O Detetive investiga…',
+    prompt: 'Toque em alguém e o narrador responde na hora: inocente ou suspeito.',
+  },
 };
 
 /** Presets de sala (editor de regras da Fase 5). */

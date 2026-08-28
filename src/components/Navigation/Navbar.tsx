@@ -22,7 +22,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { GamePhase, PrivatePlayerSnapshot, VotingMode } from '../../engine/types.ts';
-import { ROLE_METADATA } from '../../engine/rules.ts';
+import { NIGHT_TURN_ROLE, ROLE_METADATA } from '../../engine/rules.ts';
 import { sound } from '../../services/soundEffects.ts';
 
 interface NavbarProps {
@@ -79,6 +79,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     snapshot?.room.config.votingMode === VotingMode.SEQUENTIAL
   ) {
     phaseInfo = { ...phaseInfo, label: 'Votação aberta' };
+  }
+  // Durante a noite, o chip mostra qual papel o narrador está chamando
+  const nightTurn = snapshot?.room.nightTurn ?? null;
+  if (phaseInfo && phase === GamePhase.NIGHT_ACTIONS && nightTurn) {
+    const turnMeta = ROLE_METADATA[NIGHT_TURN_ROLE[nightTurn]];
+    phaseInfo = { ...phaseInfo, label: `Noite • ${turnMeta.name}` };
   }
   const playerRoleMeta = snapshot?.player.role ? ROLE_METADATA[snapshot.player.role] : null;
   const inMatch = snapshot && phase !== GamePhase.LOBBY;

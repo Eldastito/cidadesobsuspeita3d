@@ -20,32 +20,32 @@ interface RoleRevealModalProps {
 /** Tutorial curto e específico por papel (PRD 6.3). */
 const TUTORIAL_STEPS: Record<Role, string[]> = {
   [Role.ASSASSINO]: [
-    'À noite, toque em alguém na praça e confirme o ataque — a maioria dos assassinos define a vítima.',
+    'Espere o narrador chamar: "Assassinos, acordem". Toque em alguém na praça — pronto, a vítima está marcada.',
+    'Quem você tocar É quem cai (sem sorteio). Com comparsas, a última marcação da equipe vale para todos.',
     'De dia, finja inocência: debata, acuse os outros e nunca proteja demais um comparsa.',
-    'Vocês vencem quando os assassinos igualarem o número de moradores vivos.',
   ],
   [Role.MEDICO]: [
-    'À noite, escolha alguém para proteger do ataque dos assassinos.',
+    'Espere o narrador chamar: "Médico, acorde". Toque em quem você quer proteger — um toque basta.',
     'Você pode se proteger uma única vez na partida e não pode repetir o alvo da noite anterior.',
-    'Não conte a ninguém quem você salvou — isso entrega sua identidade.',
+    'Se salvar alguém, só você fica sabendo — não conte, isso entrega sua identidade.',
   ],
   [Role.DETETIVE]: [
-    'À noite, investigue um suspeito; o resultado chega ao seu caderno no amanhecer.',
-    '“Suspeito” significa assassino; “não suspeito”, qualquer outro papel.',
+    'Espere o narrador chamar: "Detetive, acorde". Toque em um suspeito e a resposta vem NA HORA: 👍 inocente ou 👎 suspeito.',
+    'É uma pergunta por noite, e tudo fica anotado no seu caderno.',
     'Cuidado ao revelar o que sabe: detetives expostos viram alvo na mesma noite.',
   ],
   [Role.BRUXA]: [
     'Você tem 2 poções para a partida inteira: uma mata, outra protege a cidade toda por uma noite.',
-    'Cada noite escolha uma opção — ou guarde as poções para um momento decisivo.',
+    'Quando o narrador chamar a Bruxa, escolha uma opção — ou guarde as poções para um momento decisivo.',
     'A poção da morte funciona mesmo se o Médico proteger o alvo. Use com sabedoria.',
   ],
   [Role.GUARDA]: [
-    'À noite, escolha alguém para escoltar — você não pode escoltar a si mesmo.',
+    'Quando o narrador chamar o Guarda-costas, toque em quem você quer escoltar — você não pode escoltar a si mesmo.',
     'Se os assassinos atacarem essa pessoa, você morre no lugar dela.',
     'Proteja quem parece importante para a cidade, mas sem se entregar no debate.',
   ],
   [Role.CIDADAO]: [
-    'À noite, anote em segredo um palpite de quem parece suspeito.',
+    'À noite você dorme tranquilo — nenhuma tarefa, só esperar o amanhecer.',
     'De dia, observe contradições: quem acusa demais? Quem se defende rápido demais?',
     'Seu voto é a arma da cidade — convença os outros e concentre votos no julgamento.',
   ],
